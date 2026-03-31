@@ -18,26 +18,39 @@ def get_stealth_name(full_name: str) -> str:
 
 
 # --- THE SERVICE MESSAGE CLEANER ---
-# @router.message(F.content_type.in_({ContentType.NEW_CHAT_MEMBERS, ContentType.LEFT_CHAT_MEMBER}))
+# @router.message(F.service)
 # async def clean_service_messages(message: types.Message):
 #     """
-#     Instantly deletes 'User joined' and 'User left' system messages 
-#     to keep the group professional and clean.
+#     Catch-all for 'User joined via link', 'User left', 'Pinned message', 
+#     'Group name changed', etc.
 #     """
 #     try:
 #         await message.delete()
+#         logger.info(f"🗑 Deleted service message in chat {message.chat.id}")
 #     except Exception as e:
+#         # If the bot isn't an admin or doesn't have "Delete Messages" permission, this fails
 #         logger.error(f"Failed to delete service message: {e}")
-        
         
 @router.chat_join_request()
 async def handle_join_request(update: ChatJoinRequest, db: Database):
     user_id = update.from_user.id
     chat_id = update.chat.id 
+
+    
+    # DEBUG PRINT: This will show up in your terminal no matter what
+    print(f"📥 JOIN REQUEST DETECTED!")
+    print(f"FROM USER: {user_id}")
+    print(f"INCOMING CHAT ID: {chat_id}")
+    print(f"EXPECTED GROUP ID: {settings.CHALLENGE_GROUP_ID}")
     
     # Identify IDs
-    target_group_id = int(settings.CHALLENGE_GROUP_ID)
-    target_channel_id = int(settings.CHALLENGE_CHANNEL_ID)
+    try:
+        target_group_id = int(settings.CHALLENGE_GROUP_ID)
+        target_channel_id = int(settings.CHALLENGE_CHANNEL_ID)
+        print('here is a target group and target channed id', target_channel_id, target_group_id)
+    except (ValueError, TypeError):
+        logger.error("CHALLENGE_GROUP_ID or CHANNEL_ID not set correctly in settings")
+        return
 
     # 1. Determine Target
     is_group = chat_id == target_group_id
@@ -49,6 +62,7 @@ async def handle_join_request(update: ChatJoinRequest, db: Database):
 
     # 2. Check Database for Status
     user = await db.get_user(user_id)
+    logger.info(f"Join Request from {user_id} for {chat_id}. Verified: {user.get('registration_step') if user else 'No User'}")
     lang = user.get('language', 'EN') if user else 'EN'
     is_verified = user and user.get('is_paid') and user.get('registration_step') == 'verified'
     

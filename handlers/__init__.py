@@ -4,14 +4,15 @@ from .debug_router import router as debug_router
 from .tasks import router as tasks
 from .admin import router as admin
 from .group import router as group
-# from .dashboard import router as dashboard
-# from .admin import router as admin
-# from .fallback import router as fallback
+from .user_dashboard import router as user_dashboard
+
 
 # The order here is critical for the Dispatcher
 all_routers = [
-    admin,       # Admin first (highest priority)
+    # debug_router,
     group,
+    admin,       # Admin first (highest priority)
+    user_dashboard,
     onboarding,
     payment,
     tasks,

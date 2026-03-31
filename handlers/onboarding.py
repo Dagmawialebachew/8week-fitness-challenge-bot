@@ -1,13 +1,15 @@
 from aiogram import Router, F, types
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.db import Database
 from handlers.tasks import send_to_admin_group
-from utils.localization import LEGAL_TEXTS, get_text
+from handlers.user_dashboard import get_main_dashboard
+from utils.localization import LEGAL_TEXTS, get_member_card, get_text
 from keyboards import inline as kb
 from config import settings as Config
 from aiogram.utils.media_group import MediaGroupBuilder # New Import for Gallery
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 
 router = Router(name="onboarding")
@@ -30,26 +32,56 @@ class ChallengeStates(StatesGroup):
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, db: Database):
     await state.clear()
-    user = await db.get_user(message.from_user.id)
+    user_id = message.from_user.id
+    user = await db.get_user(user_id)
     
-    if user and user.get('is_paid'):
+    # --- 1. HANDLE PAID / VERIFIED / REJECTED ---
+    if user and user.get('registration_step') in ['verification_pending', 'verified', 'rejected']:
         lang = user.get('language', 'EN')
-        msg = (
-            "<b>WELCOME BACK CHAMPION!</b> 🏆\n\n"
-            "Your profile is locked in. Get ready for the transformation of a lifetime."
-            if lang == "EN" else
-            "<b>እንኳን ደህና መጡ ሻምፒዮን!</b> 🏆\n\n"
-            "ምዝገባዎ ተጠናቋል። ለህይወት ለውጥዎ ዝግጁ ይሁኑ።"
+        step = user.get('registration_step')
+        
+        # Generate the Digital Card text you provided
+        card_text = get_member_card(
+            lang=lang, 
+            user_id=user_id, 
+            name=user.get('full_name', 'Challenger'),
+            registration_step=step
         )
-        return await message.answer(msg)
+        
+        if step == 'verified':
+            # --- 10/10 SENIOR MOVE: Show Card + Your Persistent Dashboard ---
+            await message.answer(card_text, parse_mode="HTML") # The Card
+            return await message.answer(
+                "🏆 <b>DASHBOARD UNLOCKED</b>" if lang == "EN" else "🏆 <b>ዳሽቦርድ ተከፍቷል</b>",
+                reply_markup=get_main_dashboard(lang) # Your Reply Keyboard
+            )
 
-    # Clean Language Selection
+        elif step == 'rejected':
+            # Inline button for Re-applying
+            retry_kb = InlineKeyboardBuilder()
+            btn = "🔄 Re-apply / ድጋሚ ይሞክሩ" if lang == "EN" else "🔄 ድጋሚ ይሞክሩ"
+            retry_kb.row(types.InlineKeyboardButton(text=btn, callback_data="retry_registration"))
+            return await message.answer(card_text, reply_markup=retry_kb.as_markup(), parse_mode="HTML")
+
+        else:
+            # Verification Pending: Let them refresh
+            refresh_kb = InlineKeyboardBuilder()
+            btn = "🔄 Refresh Status / አድስ" if lang == "EN" else "🔄 አድስ"
+            refresh_kb.row(types.InlineKeyboardButton(text=btn, callback_data="refresh_status"))
+            return await message.answer(card_text, reply_markup=refresh_kb.as_markup(), parse_mode="HTML")
+
+    # --- 2. THE RESUME GATEWAY (Intermediate Progress) ---
+    partial_steps = ['full_name', 'phone', 'gender', 'age', 'weight', 'legal', 'photo_front']
+    if user and user.get('registration_step') in partial_steps:
+        # (Resume logic we brainstormed earlier goes here...)
+        pass
+
+    # --- 3. NEW START ---
     await message.answer(
         "<b>CHOOSE YOUR LANGUAGE / ቋንቋ ይምረጡ</b> 🌐", 
         reply_markup=kb.lang_selection()
     )
     await state.set_state(ChallengeStates.language)
-    
 
 import asyncio
 from aiogram.enums import ChatAction
@@ -250,68 +282,90 @@ async def handle_legal_toggles(callback: types.CallbackQuery, state: FSMContext)
         await callback.answer()
 
 # 2.1 HANDLE FRONT PHOTO
+# 2.1 HANDLE FRONT PHOTO
 @router.message(ChallengeStates.before_photo_front, F.photo)
-async def process_front_photo(message: types.Message, state: FSMContext):
+async def process_front_photo(message: types.Message, state: FSMContext, db: Database):
     data = await state.get_data()
     lang = data['language']
-    
-    # Save Photo (No deletion)
+
+    # --- GALLERY GUARD (Localized) ---
+    if message.media_group_id:
+        error_msg = "⚠️ Please send photos <b>one by one</b>, not as a gallery." if lang == "EN" \
+                    else "⚠️ እባክዎን ፎቶዎቹን <b>አንዱን ከላኩ በኋላ ቀጣዩን</b> ይላኩ (በአንድ ላይ አይላኩ)።"
+        return await message.answer(error_msg, parse_mode="HTML")
+
+    # Save to FSM
     await state.update_data(photo_front_file_id=message.photo[-1].file_id)
     
-    # Respond with a NEW message (Confirmation + Next Step)
-    # If the localization key doesn't exist, we provide a fallback string here
-    next_text = get_text(lang, "ask_photo_side") or "✅ Front photo received! Now, please send the **SIDE** view."
-    await message.answer(next_text, parse_mode="HTML")
+    # 10/10 Save Point: Sync DB so "Resume" works
+    await db.update_user(message.from_user.id, registration_step='photo_side')
     
+    # Success Message
+    next_text = get_text(lang, "ask_photo_side")
+    await message.answer(f"✅ {next_text}", parse_mode="HTML")
     await state.set_state(ChallengeStates.before_photo_side)
 
 # 2.2 HANDLE SIDE PHOTO
 @router.message(ChallengeStates.before_photo_side, F.photo)
-async def process_side_photo(message: types.Message, state: FSMContext):
+async def process_side_photo(message: types.Message, state: FSMContext, db: Database):
     data = await state.get_data()
     lang = data['language']
-    
-    # Save Photo (No deletion)
+
+    # --- GALLERY GUARD ---
+    if message.media_group_id:
+        error_msg = "⚠️ Please send photos one by one." if lang == "EN" else "⚠️ እባክዎን ፎቶዎቹን একে একে ይላኩ።"
+        return await message.answer(error_msg)
+
     await state.update_data(photo_side_file_id=message.photo[-1].file_id)
     
-    # Respond with a NEW message
-    next_text = get_text(lang, "ask_photo_rear") or "✅ Side photo received! Finally, please send the **REAR** (back) view."
-    await message.answer(next_text, parse_mode="HTML")
+    # Save Point
+    await db.update_user(message.from_user.id, registration_step='photo_rear')
     
+    next_text = get_text(lang, "ask_photo_rear")
+    await message.answer(f"✅ {next_text}", parse_mode="HTML")
     await state.set_state(ChallengeStates.before_photo_rear)
 
 # 2.3 HANDLE REAR PHOTO -> TRANSITION TO FAYDA
 @router.message(ChallengeStates.before_photo_rear, F.photo)
-async def process_rear_photo(message: types.Message, state: FSMContext):
+async def process_rear_photo(message: types.Message, state: FSMContext, db: Database):
     data = await state.get_data()
     lang = data['language']
-    
-    # Save Photo (No deletion)
+
+    if message.media_group_id:
+        return await message.answer("⚠️ Send photos one by one.")
+
     await state.update_data(photo_rear_file_id=message.photo[-1].file_id)
     
-    # Final confirmation of photos
-    confirm_text = get_text(lang, "before_photo_received") or "✅ All photos saved! We are almost done."
-    await message.answer(confirm_text)
+    # Save Point
+    await db.update_user(message.from_user.id, registration_step='fayda')
     
-    # PROCEED TO FAYDA ID
-    fayda_text = get_text(lang, "ask_fayda") or "Please upload your Fayda ID (National ID) to verify your entry."
+    await message.answer(get_text(lang, "before_photo_received"))
+    
+    # Show Fayda Example
+    fayda_prompt = get_text(lang, "ask_fayda")
     await message.answer_photo(
         photo=Config.FAYDA_EXAMPLE_ID,
-        caption=fayda_text
+        caption=fayda_prompt
     )
     await state.set_state(ChallengeStates.fayda_upload)
+
 # 3. FAYDA ID HANDLER
 @router.message(ChallengeStates.fayda_upload, F.photo)
-async def process_fayda(message: types.Message, state: FSMContext):
-    # Save the user's actual ID photo
+async def process_fayda(message: types.Message, state: FSMContext, db: Database):
+    if message.media_group_id:
+        return await message.answer("⚠️ Please send your ID separately.")
+
     await state.update_data(fayda_file_id=message.photo[-1].file_id)
     lang = (await state.get_data())['language']
     
-    await message.answer(get_text(lang, "fayda_received"))
+    # Save Point: They are now ready for Payment
+    await db.update_user(message.from_user.id, registration_step='payment')
     
-    # SEND PAYMENT INSTRUCTIONS (Text Only)
+    await message.answer(get_text(lang, "fayda_received"))
     await message.answer(get_text(lang, "ask_payment"))
     await state.set_state(ChallengeStates.payment_upload)
+    
+    
 import asyncio
 from aiogram.utils.media_group import MediaGroupBuilder
 
@@ -352,3 +406,121 @@ async def handle_registration_finish(message: types.Message, state: FSMContext, 
     asyncio.create_task(send_to_admin_group(message.bot, message.from_user.id, data, payment_photo))
     
     await state.clear()
+    
+    
+    
+#For rejection Purpose
+
+@router.callback_query(F.data == "retry_registration")
+async def process_retry_registration(callback: types.CallbackQuery, state: FSMContext, db: Database):
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'EN') if user else 'EN'
+
+    # 1. Wipe old file IDs from the Database to ensure a clean slate
+    await db.update_user(
+        user_id,
+        photo_front_file_id=None,
+        photo_side_file_id=None,
+        photo_rear_file_id=None,
+        fayda_file_id=None,
+        registration_step='re-uploading'
+    )
+
+    # 2. Reset FSM State to the first photo step
+    await state.set_state(ChallengeStates.before_photo_front)
+
+    # 3. Inform the user and show the Gallery again
+    instruction = (
+        "<b>RE-UPLOAD STARTED</b> 🔄\n\n"
+        "Please follow the examples below and send your <b>FRONT VIEW</b> photo."
+        if lang == "EN" else
+        "<b>የፎቶ መላክ ሂደት ተጀምሯል</b> 🔄\n\n"
+        "እባክዎን ከታች ያለውን ምሳሌ በመከተል <b>የፊት ለፊት</b> ፎቶዎን ይላኩ።"
+    )
+
+    # Show the reference photos again so they know what "good" looks like
+    album = MediaGroupBuilder(caption=get_text(lang, "photo_gallery_intro"))
+    album.add_photo(media=Config.BEFORE_EXAMPLE_ID) 
+    album.add_photo(media=Config.BEFORE_SIDE_ID)    
+    album.add_photo(media=Config.BEFORE_REAR_ID)    
+    
+    await callback.message.answer_media_group(media=album.build())
+    await callback.message.answer(instruction, parse_mode="HTML")
+    await callback.answer()
+    
+    
+
+
+@router.callback_query(F.data == "resume_reg")
+async def resume_registration(callback: types.CallbackQuery, state: FSMContext, db: Database):
+    user = await db.get_user(callback.from_user.id)
+    step = user.get('registration_step')
+    lang = user.get('language', 'EN')
+    
+    # 1. Map DB strings to ChallengeStates
+    # This acts like a 'Save Point' in a video game
+    state_mapping = {
+        'full_name': ChallengeStates.full_name,
+        'phone': ChallengeStates.phone,
+        'gender': ChallengeStates.gender,
+        'age': ChallengeStates.age,
+        'weight': ChallengeStates.weight,
+        'legal': ChallengeStates.legal,
+        'photo_front': ChallengeStates.before_photo_front,
+        'photo_side': ChallengeStates.before_photo_side,
+        'photo_rear': ChallengeStates.before_photo_rear,
+        'fayda': ChallengeStates.fayda_upload,
+        'payment': ChallengeStates.payment_upload
+    }
+
+    target_state = state_mapping.get(step, ChallengeStates.full_name)
+    
+    # 2. Sync FSM with Database data
+    # We load what they already did into the FSM memory so the final step has it
+    await state.update_data(
+        language=lang,
+        full_name=user.get('full_name'),
+        phone_number=user.get('phone_number'),
+        gender=user.get('gender'),
+        age=user.get('age'),
+        current_weight_kg=user.get('current_weight_kg')
+    )
+
+    # 3. Move them to the state
+    await state.set_state(target_state)
+
+    # 4. Trigger the prompt for that state
+    # Example: If they stopped at weight, ask for weight again
+    prompts = {
+        'photo_front': get_text(lang, "ask_photo_front"),
+        'photo_side': get_text(lang, "ask_photo_side"),
+        'fayda': get_text(lang, "ask_fayda"),
+        'payment': get_text(lang, "ask_payment")
+    }
+    
+    prompt_text = prompts.get(step, "Please continue where you left off.")
+    await callback.message.answer(f"✅ <b>RESUMED</b>\n\n{prompt_text}", parse_mode="HTML")
+    await callback.answer()
+    
+
+@router.message(
+    StateFilter(
+        ChallengeStates.before_photo_front, 
+        ChallengeStates.before_photo_side, 
+        ChallengeStates.before_photo_rear,
+        ChallengeStates.fayda_upload,
+        ChallengeStates.payment_upload
+    ),
+    ~F.photo
+)
+async def handle_wrong_photo_format(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get('language', 'EN')
+    
+    error_text = (
+        "❌ <b>Invalid format!</b>\nPlease send a <b>PHOTO</b> (not a file or text)."
+        if lang == "EN" else
+        "❌ <b>የተሳሳተ አላላክ!</b>\nእባክዎን <b>ፎቶ</b> ብቻ ይላኩ (ፋይል ወይም ጽሁፍ አይቀበልም)።"
+    )
+    await message.answer(error_text, parse_mode="HTML")

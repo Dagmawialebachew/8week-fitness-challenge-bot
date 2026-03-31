@@ -13,21 +13,27 @@ from aiogram.utils.media_group import MediaGroupBuilder
 import logging
 
 logger = logging.getLogger(__name__)
+import logging
+from aiogram.utils.media_group import MediaGroupBuilder
+from config import settings
+from utils.localization import get_member_card
+
+logger = logging.getLogger(__name__)
+
 async def send_to_admin_group(bot, user_id: int, data: dict, payment_photo: str):
     """
     Handles background delivery of registration data to Admins and the User.
-    Updated for 5-photo validation and dynamic card status.
+    Optimized for high-reliability and clean Admin UI.
     """
     admin_group_id = settings.ADMIN_NEW_USER_LOG_ID 
     lang = data.get('language', 'EN')
     full_name = data.get('full_name', 'Participant')
     
-    # Generate the Code (Used for display only here)
+    # Generate ID for display
     member_no = f"EW1-2026-{str(user_id)[-4:]}"
 
-    # --- 1. USER NOTIFICATION (Digital Card) ---
+    # --- 1. USER NOTIFICATION (Instant Feedback) ---
     try:
-        # Pass 'verification_pending' since they just finished the process
         user_card_text = get_member_card(
             lang, 
             user_id, 
@@ -41,44 +47,67 @@ async def send_to_admin_group(bot, user_id: int, data: dict, payment_photo: str)
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"User Card Notify Fail {user_id}: {e}")
+        logger.error(f"❌ User Card Notify Fail {user_id}: {e}")
 
-    # --- 2. ADMIN NOTIFICATION (The Full Gallery) ---
+    # --- 2. ADMIN DOSSIER (The Full Gallery) ---
     try:
+        # Build a cleaner, more 'Surgical' Admin Caption
         admin_caption = (
             f"🔔 <b>NEW CHALLENGE APPLICATION</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 <b>Name:</b> {full_name}\n"
+            f"👤 <b>NAME:</b> {full_name.upper()}\n"
             f"🔢 <b>CODE:</b> <code>{member_no}</code>\n"
-            f"📞 <b>Phone:</b> <code>{data.get('phone_number', 'N/A')}</code>\n"
-            f"⚖️ <b>Weight:</b> {data.get('current_weight_kg')}kg | <b>Age:</b> {data.get('age')}\n"
-            f"✅ Terms: {'Yes' if data.get('accepted_terms') else 'No'}\n"
-            f"🏥 Health Clear: {'Yes' if data.get('has_health_clearance') else 'No'}\n"
+            f"📞 <b>PHONE:</b> <code>{data.get('phone_number', 'N/A')}</code>\n"
+            f"⚖️ <b>WEIGHT:</b> {data.get('current_weight_kg')}kg | <b>AGE:</b> {data.get('age')}\n"
+            f"────────────────────\n"
+            f"✅ <b>Terms:</b> {'Yes' if data.get('accepted_terms') else 'No'}\n"
+            f"🏥 <b>Health:</b> {'Yes' if data.get('has_health_clearance') else 'No'}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🖼 <i>Check all 5 photos below (3 Body, 1 ID, 1 Payment)</i>"
+            f"🖼 <i>5 Photos: Front | Side | Rear | ID | Receipt</i>"
         )
 
         album = MediaGroupBuilder(caption=admin_caption)
         
-        # Adding the 5 Proofs in order
-        album.add_photo(media=data['photo_front_file_id'])
-        album.add_photo(media=data['photo_side_file_id'])
-        album.add_photo(media=data['photo_rear_file_id'])
-        album.add_photo(media=data['fayda_file_id'])
-        album.add_photo(media=payment_photo)
+        # We use a list to make adding photos safer/cleaner
+        photos = [
+            data['photo_front_file_id'],
+            data['photo_side_file_id'],
+            data['photo_rear_file_id'],
+            data['fayda_file_id'],
+            payment_photo
+        ]
 
-        # Send the media group
+        for photo in photos:
+            album.add_photo(media=photo)
+
+        # Send the Media Group
+        # Senior Tip: We store the returned message list to use the first ID for the reply
         messages = await bot.send_media_group(chat_id=admin_group_id, media=album.build())
 
         # --- 3. DECISION BUTTONS ---
-        # Reply to the first photo of the album to keep the chat organized
+        # We reply to the FIRST photo of the album. 
+        # This keeps the 'Approve' buttons physically attached to the photos.
+        decision_text = (
+            f"📋 <b>Review Required:</b> {full_name}\n"
+            f"<i>Action will notify the user immediately.</i>"
+        )
+        
         await bot.send_message(
             chat_id=admin_group_id,
-            text=f"Review required for <b>{full_name}</b>:",
+            text=decision_text,
             reply_to_message_id=messages[0].message_id,
-            reply_markup=kb.admin_verify_keyboard(user_id),
+            reply_markup=kb.admin_verify_keyboard(user_id), # Ensure this helper exists
             parse_mode="HTML"
         )
+        
+        logger.info(f"✅ Full Dossier sent to Admin for User {user_id}")
 
     except Exception as e:
-        logger.error(f"ADMIN NOTIFY ERROR for user {user_id}: {e}")
+        # If the MediaGroup fails, we send a 'Panic' text so the Admin knows someone applied
+        logger.error(f"🚨 CRITICAL: Admin Gallery Fail for {user_id}: {e}")
+        error_report = (
+            f"🚨 <b>GALLERY FAILED TO LOAD</b>\n"
+            f"User {full_name} ({user_id}) submitted but photos couldn't bundle.\n"
+            f"Please check the Database/Logs."
+        )
+        await bot.send_message(chat_id=admin_group_id, text=error_report)

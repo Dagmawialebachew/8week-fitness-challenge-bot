@@ -1,6 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from database.db import Database
+from handlers.user_dashboard import get_main_dashboard
 from utils.localization import get_text, get_member_card
 import logging
 from datetime import datetime, timezone
@@ -26,7 +27,6 @@ class AdminStates(StatesGroup):
 # --- 1. HANDLE APPROVAL ---
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import timedelta
-
 # --- 1. HANDLE APPROVAL ---
 @router.callback_query(F.data.startswith("approve_"))
 async def approve_user(callback: types.CallbackQuery, db: Database):
@@ -42,7 +42,7 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
     # 1. Update Database
     await db.update_user(user_id, registration_step='verified', is_paid=True)
 
-    # 2. Update Admin UI (Remove buttons to prevent double approval)
+    # 2. Update Admin UI
     try:
         await callback.message.edit_text(
             f"{callback.message.text}\n\n✅ <b>APPROVED BY:</b> @{callback.from_user.username}",
@@ -52,8 +52,7 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
     except Exception:
         pass
 
-    # 3. Handle Invite Links (Group & Channel)
-    # --- GROUP LINK ---
+    # 3. Handle Invite Links
     try:
         group_invite = await callback.bot.create_chat_invite_link(
             chat_id=settings.CHALLENGE_GROUP_ID,
@@ -62,10 +61,8 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
         )
         group_url = group_invite.invite_link
     except Exception as e:
-        logger.error(f"Group Link Creation Fail: {e}")
         group_url = settings.CHALLENGE_GROUP_INVITE_LINK
 
-    # --- CHANNEL LINK ---
     try:
         channel_invite = await callback.bot.create_chat_invite_link(
             chat_id=settings.CHALLENGE_CHANNEL_ID,
@@ -74,12 +71,11 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
         )
         channel_url = channel_invite.invite_link
     except Exception as e:
-        logger.error(f"Channel Link Creation Fail: {e}")
         channel_url = settings.CHALLENGE_CHANNEL_ID
 
     user_card = get_member_card(lang, user_id, full_name, registration_step='verified')
 
-    # 4. Prepare Bilingual Notification
+    # 4. Prepare Bilingual Notification (STICKING TO YOUR EXACT TEXT)
     if lang == "EN":
         congrats_text = (
             f"🚀 <b>CONGRATULATIONS {full_name.upper()}!</b>\n\n"
@@ -92,8 +88,8 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
             f"🔗 {channel_url}\n\n"
             f"<i>Click the buttons below to request access!</i>"
         )
-        btn_group = "💪 JOIN THE GROUP"
-        btn_channel = "📢 JOIN THE CHANNEL"
+        btn_group, btn_channel = "💪 JOIN THE GROUP", "📢 JOIN THE CHANNEL"
+        link_header = "🔗 <b>ACCESS LINKS:</b>"
     else:
         congrats_text = (
             f"🚀 <b>እንኳን ደስ አለዎት {full_name.upper()}!</b>\n\n"
@@ -106,38 +102,38 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
             f"🔗 {channel_url}\n\n"
             f"<i>ከታች ያሉትን በተኖች በመጫን መግቢያ ይጠይቁ!</i>"
         )
-        btn_group = "💪 ግሩፑን ይቀላቀሉ"
-        btn_channel = "📢 ቻናሉን ይቀላቀሉ"
+        btn_group, btn_channel = "💪 ግሩፑን ይቀላቀሉ", "📢 ቻናሉን ይቀላቀሉ"
+        link_header = "🔗 <b>የመግቢያ ሊንኮች፦</b>"
 
-    # 5. Build Keyboard (Two separate rows for clarity)
+    # 5. Build Inline Keyboard (Links)
     builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text=btn_group, url=group_url))
+    builder.row(types.InlineKeyboardButton(text=btn_channel, url=channel_url))
     
-    # Each button MUST be an InlineKeyboardButton with a URL
-    builder.row(types.InlineKeyboardButton(
-        text=btn_group, 
-        url=group_url
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text=btn_channel, 
-        url=channel_url
-    ))
-    
-    try:
-
     # 6. Send to User
+    try:
+        # FIRST MESSAGE: Congrats + Member Card + UNLOCK MAIN MENU
         await callback.bot.send_message(
             chat_id=user_id, 
             text=congrats_text, 
             parse_mode="HTML",
-            reply_markup=builder.as_markup() # Convert builder to markup
+            reply_markup=get_main_dashboard(lang) # This shows the Profile/Help buttons
         )
+        
+        # SECOND MESSAGE: The actual clickable Link Buttons
+        await callback.bot.send_message(
+            chat_id=user_id,
+            text=link_header,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        
         await callback.answer("Verified! Instructions sent.", show_alert=False)
         
-        
     except Exception as e:
-        logger.error(f"Failed to notify user {user_id}: {e}")
-        await callback.answer("Approved, but user has blocked the bot.", show_alert=True)
-
+        # Log the actual error to see why it failed (don't just assume block)
+        logging.error(f"Failed to notify user {user_id}: {e}")
+        await callback.answer("Error sending message. Check logs.", show_alert=True)
 # --- 2. HANDLE REJECTION CLICK ---
 @router.callback_query(F.data.startswith("reject_"))
 async def start_rejection_process(callback: types.CallbackQuery, state: FSMContext):
@@ -155,7 +151,6 @@ async def start_rejection_process(callback: types.CallbackQuery, state: FSMConte
     )
     await state.set_state(AdminStates.waiting_for_rejection_reason)
     await callback.answer()
-
 # --- 3. CAPTURE REASON & NOTIFY USER ---
 @router.message(AdminStates.waiting_for_rejection_reason)
 async def finalize_rejection(message: types.Message, state: FSMContext, db: Database):
@@ -167,10 +162,10 @@ async def finalize_rejection(message: types.Message, state: FSMContext, db: Data
     user = await db.get_user(user_id)
     lang = user.get('language', 'EN') if user else 'EN'
 
-    # 1. Update DB
+    # 1. Update DB to reflect rejection
     await db.update_user(user_id, registration_step='rejected')
 
-    # 2. Update Admin UI (The original registration message)
+    # 2. Update Admin UI (Edit original registration card)
     try:
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
@@ -179,31 +174,43 @@ async def finalize_rejection(message: types.Message, state: FSMContext, db: Data
             parse_mode="HTML"
         )
     except Exception:
-        pass # Message might be old
+        pass 
 
-    # 3. Notify the User with the specific reason
+    # 3. Create the "Self-Healing" Button for the User
+    retry_builder = InlineKeyboardBuilder()
+    retry_text = "🔄 Re-upload Everything / ድጋሚ ይላኩ" if lang == "EN" else "🔄 ሁሉንም ድጋሚ ይላኩ"
+    # We use a specific callback data that we will handle in onboarding.py
+    retry_builder.row(types.InlineKeyboardButton(text=retry_text, callback_data="retry_registration"))
+
+    # 4. Notify the User
     fail_header = "❌ <b>Registration Update</b>" if lang == "EN" else "❌ <b>የምዝገባ ሁኔታ</b>"
-    fail_body = (
-        f"Your application was not approved for the following reason:\n\n"
-        f"👉 <b>{reason}</b>\n\n"
-        "Please correct this and contact support or restart the registration."
-        if lang == "EN" else
-        f"ምዝገባዎ በሚከተለው ምክንያት ተቀባይነት አላገኘም፦\n\n"
-        f"👉 <b>{reason}</b>\n\n"
-        "እባክዎን ይህንን አስተካክለው ድጋሚ ይሞክሩ ወይም አስተዳዳሪውን ያነጋግሩ።"
-    )
+    
+    if lang == "EN":
+        fail_body = (
+            f"Your application was not approved for the following reason:\n\n"
+            f"👉 <b>{reason}</b>\n\n"
+            "Please click the button below to re-upload your photos and ID correctly."
+        )
+    else:
+        fail_body = (
+            f"ምዝገባዎ በሚከተለው ምክንያት ተቀባይነት አላገኘም፦\n\n"
+            f"👉 <b>{reason}</b>\n\n"
+            "እባክዎን ከታች ያለውን በተን በመጫን ፎቶዎችን እና መታወቂያዎን በድጋሚ ይላኩ።"
+        )
 
     try:
-        await message.bot.send_message(chat_id=user_id, text=f"{fail_header}\n\n{fail_body}", parse_mode="HTML")
+        await message.bot.send_message(
+            chat_id=user_id, 
+            text=f"{fail_header}\n\n{fail_body}", 
+            parse_mode="HTML",
+            reply_markup=retry_builder.as_markup()
+        )
         await message.answer(f"✅ Rejection sent to user {user_id}.")
     except Exception as e:
         logger.error(f"Failed to notify user {user_id}: {e}")
-        await message.answer("⚠️ Could not message user (they might have blocked the bot).")
+        await message.answer("⚠️ Could not message user.")
 
     await state.clear()
-    
-    
-
 
 
 class AdminStates(StatesGroup):
