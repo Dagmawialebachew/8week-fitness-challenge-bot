@@ -58,14 +58,17 @@ STRINGS = {
             "To make sure the prize goes to the right person, please take a clear photo of your <b>National ID (Fayda)</b> and send it here."
         ),
         "ask_payment": (
-            "📍 <b>Step 9/9 — Final Step!</b> 💸\n"
-            "▰▰▰▰▰▰\n\n"
-            "To lock in your spot for the 150,000 ETB prize, pay the <b>1000 ETB</b> entry fee:\n\n"
-            "Bank: <b>[Bank Name]</b>\n"
-            "Account: <code>[Acc Number]</code>\n"
-            "Name: <b>[Name]</b>\n\n"
-            "<b>Send a screenshot of your receipt here!</b>"
-        ),
+   
+        "📍 <b>Step 9/9 — Final Step!</b> 💸\n"
+        "▰▰▰▰▰▰\n\n"
+        "To lock in your spot for the 150,000 ETB prize, pay the <b>1000 ETB</b> entry fee:\n\n"
+        "🏦 <b>CBE:</b> <code>{cbe_no}</code>\n\n"
+        "💴 <b>Bank Of Abysniya:</b> <code>{boa_no}</code>\n\n"
+        "📱 <b>Telebirr:</b> <code>{tele_no}</code>\n\n"
+        "👤 <b>Name:</b> <b>{acc_name}</b>\n\n"
+        "<i>You can copy the number by taping it. No need to type manually!</i>\n\n"
+        "<b>Send a screenshot of your receipt here!</b>"
+    ),
         "btn_agree": "✅ I Agree, Let's Go!",
         "btn_male": "Male 👨",
         "btn_female": "Female 👩",
@@ -140,13 +143,15 @@ STRINGS = {
             "ሽልማቱ ለትክክለኛው ሰው መድረሱን ለማረጋገጥ፣ የ<b>ብሄራዊ መታወቂያ (ፋይዳ)</b> ፎቶ እዚህ ይላኩ።"
         ),
         "ask_payment": (
-            "📍 <b>ምዕራፍ 9/9 — የመጨረሻ ደረጃ!</b> 💸\n"
-            "▰▰▰▰▰▰\n\n"
-            "የ150,000 ብር ሽልማት ውድድር ውስጥ ለመግባት የ<b>1000 ብር</b> መመዝገቢያ ይክፈሉ፦\n\n"
-            "ባንክ፦ <b>[Bank Name]</b>\n"
-            "አካውንት፦ <code>[Acc Number]</code>\n"
-            "ስም፦ <b>[Name]</b>\n\n"
-            "<b>የከፈሉበትን ደረሰኝ ፎቶ እዚህ ይላኩ!</b>"
+           "📍 <b>ምዕራፍ 9/9 — የመጨረሻ ደረጃ!</b> 💸\n"
+        "▰▰▰▰▰▰\n\n"
+        "የ150,000 ብር ሽልማት ውድድር ውስጥ ለመግባት የ<b>1000 ብር</b> መመዝገቢያ ይክፈሉ፦\n\n"
+        "🏦 <b>ንግድ ባንክ:</b> <code>{cbe_no}</code>\n\n"
+        "💴 <b>አቢሲኒያ ባንክ:</b> <code>{boa_no}</code>\n\n"
+        "📱 <b>ቴሌብር:</b> <code>{tele_no}</code>\n\n"
+        "👤 <b>ስም:</b> <b>{acc_name}</b>\n\n"
+        "<i>ቁጥሩን ኮፒ ለማድረግ የአካውንት ቁጥሩን ይንኩ!</i>\n\n"
+        "<b>የከፈሉበትን ደረሰኝ ፎቶ እዚህ ይላኩ!</b>"
         ),
         "btn_agree": "✅ ተስማምቻለሁ፣ እንጀምር!",
         "btn_male": "ወንድ 👨",
@@ -192,6 +197,8 @@ LEGAL_TEXTS = {
     }
 }
 
+
+from config import settings
 def get_member_card(lang, user_id, name, registration_step='verification_pending'):
     # Generate a unique Member Number
     member_no = f"EW1-2026-{str(user_id)[-4:]}" 
@@ -233,3 +240,17 @@ def get_member_card(lang, user_id, name, registration_step='verification_pending
         
 def get_text(lang: str, key: str) -> str:
     return STRINGS.get(lang.upper(), STRINGS["EN"]).get(key, f"[{key}]")
+
+
+def get_payment_text(lang: str) -> str:
+    """
+    Dynamically injects bank info from .env into the localized string.
+    """
+    raw_text = STRINGS.get(lang.upper(), STRINGS["EN"])["ask_payment"]
+    
+    return raw_text.format(
+        cbe_no=settings.BANK_CBE,
+        boa_no=settings.BANK_BOA,
+        tele_no=settings.BANK_TELEBIRR,
+        acc_name=settings.BANK_CBE_NAME # Using one name since they are all 'Hilawe Semma'
+    )

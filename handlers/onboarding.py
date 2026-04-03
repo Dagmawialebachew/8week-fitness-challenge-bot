@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from database.db import Database
 from handlers.tasks import send_to_admin_group
 from handlers.user_dashboard import get_main_dashboard
-from utils.localization import LEGAL_TEXTS, get_member_card, get_text
+from utils.localization import LEGAL_TEXTS, get_member_card, get_payment_text, get_text
 from keyboards import inline as kb
 from config import settings as Config
 from aiogram.utils.media_group import MediaGroupBuilder # New Import for Gallery
@@ -356,13 +356,18 @@ async def process_fayda(message: types.Message, state: FSMContext, db: Database)
         return await message.answer("⚠️ Please send your ID separately.")
 
     await state.update_data(fayda_file_id=message.photo[-1].file_id)
-    lang = (await state.get_data())['language']
+    data = await state.get_data()
+    lang = data['language']
     
-    # Save Point: They are now ready for Payment
+    # Update DB Progress
     await db.update_user(message.from_user.id, registration_step='payment')
     
     await message.answer(get_text(lang, "fayda_received"))
-    await message.answer(get_text(lang, "ask_payment"))
+    
+    # USE THE NEW DYNAMIC HELPER HERE
+    payment_instruction = get_payment_text(lang) 
+    await message.answer(payment_instruction, parse_mode="HTML")
+    
     await state.set_state(ChallengeStates.payment_upload)
     
     
