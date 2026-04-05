@@ -1,11 +1,12 @@
 STRINGS = {
     "EN": {
         "ask_phone": (
-            "📍 <b>Step 2/9 — Phone Number</b> 📞\n"
-            "▰▱▱▱▱▱\n\n"
-            "We need this to call you if you win the <b>100,000 ETB!</b>\n\n"
-            "Please click the button below to share your number"
-        ),
+    "📍 <b>Step 2/9 — Contact</b> 📞\n"
+    "▰▰▱▱▱▱\n\n"
+    "We need your direct line to reach you if you win the <b>100,000 ETB!</b> 🏆\n\n"
+    "Please <b>type</b> your phone number below:\n"
+    "Example: <code>0930405060</code>"
+),
         "ask_gender": (
             "📍 <b>Step 3/9 — Your Profile</b>\n"
             "▰▰▱▱▱▱\n\n"
@@ -33,7 +34,7 @@ STRINGS = {
         ),
         "photo_gallery_intro": "📸 <b>REFERENCE GALLERY</b>\nPlease follow these 3 angles exactly:",
        "ask_photo_front": (
-            "📍 <b>Step 7/9 — The Proof (1/3)</b> 📸\n"
+            "📍 <b>Step 0/9 — The Proof (1/3)</b> 📸\n"
             "▰▰▰▰▰▱\n\n"
             "To qualify for the 150,000 ETB, we need 3 photos.\n\n"
             "<b>PHOTO 1: FRONT VIEW</b>\n"
@@ -59,7 +60,7 @@ STRINGS = {
         ),
         "ask_payment": (
    
-        "📍 <b>Step 9/9 — Final Step!</b> 💸\n"
+        "📍 <b>Step 7/9 — Payment!</b> 💸\n"
         "▰▰▰▰▰▰\n\n"
         "To lock in your spot for the 150,000 ETB prize, pay the <b>1000 ETB</b> entry fee:\n\n"
         "🏦 <b>CBE:</b> <code>{cbe_no}</code>\n\n"
@@ -73,11 +74,11 @@ STRINGS = {
         "btn_male": "Male 👨",
         "btn_female": "Female 👩",
         "btn_share_contact": "📲 Share My Number",
-        "fayda_received": "✅ <b>ID Received!</b> Only one step left.",
+        "fayda_received": "✅ <b>ID Received!</b>",
         "payment_received": (
-            "🚀 <b>CONGRATULATIONS!</b>\n\n"
-            "Your registration is sent. I will check your receipt and photos now. "
-            "I will add you to our private group very soon. <b>Get ready to win!</b>"
+"✅ <b>PAYMENT LOGGED!</b>\n\n"
+    "Your receipt has been received. Now, we just need to verify your <b>Identity</b> "
+    "to ensure a fair challenge for everyone. 🛡️"
         ),
         "error_age": "❌ <b>Oops!</b> Please enter your age as a number only (Example: 27).",
         "error_weight": "❌ <b>Oops!</b> Please enter your weight as a number only (Example: 75).",
@@ -89,10 +90,12 @@ STRINGS = {
     },
     "AM": {
         "ask_phone": (
-            "📍 <b>ምዕራፍ 2/9 — ስልክ ቁጥር</b> 📞\n"
-            "▰▱▱▱▱▱\n\n"
-            "ከታች ያለውን ቁልፍ (ስልክ ቁጥሬን አጋራ) ሚለውን በመጫን ስልክዎን ያጋሩ።"
-        ),
+    "📍 <b>ምዕራፍ 2/9 — ስልክ ቁጥር</b> 📞\n"
+    "▰▰▱▱▱▱\n\n"
+    "የ <b>100,000 ብር</b> አሸናፊ ሲሆኑ በቀጥታ ለማግኘት ስልክ ቁጥርዎን እንፈልጋለን። 🏆\n\n"
+    "እባክዎን ስልክ ቁጥርዎን <b>ከታች ይጻፉ</b>፦\n"
+    "ምሳሌ፦ <b><code>0930405060</code></b>"
+),
         "ask_gender": (
             "📍 <b>ምዕራፍ 3/9 — ጾታ</b>\n"
             "▰▰▱▱▱▱\n\n"
@@ -120,7 +123,7 @@ STRINGS = {
         ),
         "photo_gallery_intro": "📸 እባክዎን እነዚህን 3 አቀማመጦች በትክክል ይከተሉ፡",
        "ask_photo_front": (
-            "📍 <b>ምዕራፍ 7/9 — ማስረጃ (1/3)</b> 📸\n"
+            "📍 <b>ምዕራፍ 9/9 — ማስረጃ (1/3)</b> 📸\n"
             "▰▰▰▰▰▱\n\n"
             "ለ150,000 ብር ሽልማቱ ብቁ ለመሆን 3 ፎቶዎች ያስፈልጋሉ።\n\n"
             "<b>ፎቶ 1፦ የፊት ለፊት እይታ</b>\n"
@@ -143,7 +146,7 @@ STRINGS = {
             "ሽልማቱ ለትክክለኛው ሰው መድረሱን ለማረጋገጥ፣ የ<b>ብሄራዊ መታወቂያ (ፋይዳ)</b> ፎቶ እዚህ ይላኩ።"
         ),
         "ask_payment": (
-           "📍 <b>ምዕራፍ 9/9 — የመጨረሻ ደረጃ!</b> 💸\n"
+           "📍 <b>ምዕራፍ 7/9 — የመጨረሻ ደረጃ!</b> 💸\n"
         "▰▰▰▰▰▰\n\n"
         "የ150,000 ብር ሽልማት ውድድር ውስጥ ለመግባት የ<b>1000 ብር</b> መመዝገቢያ ይክፈሉ፦\n\n"
         "🏦 <b>ንግድ ባንክ:</b> <code>{cbe_no}</code>\n\n"
@@ -157,12 +160,11 @@ STRINGS = {
         "btn_male": "ወንድ 👨",
         "btn_female": "ሴት 👩",
         "btn_share_contact": "📲 ስልክ ቁጥሬን አጋራ",
-        "fayda_received": "✅ <b>መታወቂያ ተቀብለናል።</b> አንድ ደረጃ ብቻ ቀረው።",
+        "fayda_received": "✅ <b>መታወቂያ ተቀብለናል።</b>",
         "payment_received": (
-            "🚀 <b>እንኳን ደስ አለዎት!</b>\n\n"
-            "ምዝገባዎ ተልኳል። መረጃዎን አረጋግጬ በቅርቡ በግል ግሩፓችን ውስጥ እጨምርዎታለሁ። "
-            "<b>ለማሸነፍ ዝግጁ ይሁኑ!</b>"
-        ),
+          "✅ <b>ክፍያዎ ተመዝግቧል!</b>\n\n"
+    "ደረሰኝዎን ተቀብለናል! አሁን ለውድድሩ ትክክለኛነት የእርስዎን <b>መታወቂያ (ፋይዳ)</b> "
+    "ማረጋገጥ ይቀረናል። 🛡️"        ),
         "error_age": "❌ <b>ስህተት!</b> እባክዎን እድሜዎን በቁጥር ብቻ ያስገቡ (ምሳሌ፦ 27)።",
         "error_weight": "❌ <b>ስህተት!</b> እባክዎን ክብደትዎን በቁጥር ብቻ ያስገቡ (ምሳሌ፦ 75)።",
         "error_phone": (

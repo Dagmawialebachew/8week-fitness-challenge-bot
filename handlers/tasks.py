@@ -111,3 +111,37 @@ async def send_to_admin_group(bot, user_id: int, data: dict, payment_photo: str)
             f"Please check the Database/Logs."
         )
         await bot.send_message(chat_id=admin_group_id, text=error_report)
+        
+async def notify_new_lead(bot, user_id: int, data: dict):
+    """
+    Notifies the Leads Group with a clickable Telegram username.
+    """
+    lead_group_id = settings.ADMIN_NEW_LEAD_LOG_ID
+    full_name = data.get('full_name', 'Unknown')
+    username = data.get('username')
+    
+    # Create the clickable link: @username or 'No Username'
+    user_link = f"@{username}" if username else "<i>(No Username)</i>"
+    
+    # Mapping Logic for Yes/No
+    terms_status = "✅ YES" if data.get('accepted_terms') else "❌ NO"
+    health_status = "✅ YES" if data.get('has_health_clearance') else "❌ NO"
+
+    lead_caption = (
+        f"🎯 <b>NEW HOT LEAD (PRE-PAYMENT)</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>NAME:</b> {full_name.upper()}\n"
+        f"🆔 <b>USER:</b> {user_link}\n"
+        f"📞 <b>PHONE:</b> <code>{data.get('phone_number', 'N/A')}</code>\n"
+        f"⚖️ <b>WEIGHT:</b> {data.get('current_weight_kg')}kg | <b>AGE:</b> {data.get('age')}\n"
+        f"────────────────────\n"
+        f"📜 <b>Terms:</b> {terms_status}\n"
+        f"🏥 <b>Health:</b> {health_status}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Status: Viewing Payment Instructions...</i>"
+    )
+
+    try:
+        await bot.send_message(chat_id=lead_group_id, text=lead_caption, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"❌ Lead Notify Fail: {e}")

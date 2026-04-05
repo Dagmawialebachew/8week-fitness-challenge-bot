@@ -28,6 +28,7 @@ class Settings:
     ADMIN_ERROR_LOG_ID: int = int(os.getenv("ADMIN_ERROR_LOG_ID", "0"))
     ADMIN_NEW_USER_LOG_ID: int = int(os.getenv("ADMIN_NEW_USER_LOG_ID", "0"))
     ADMIN_SCHEDULER_LOG_ID: int = int(os.getenv("ADMIN_SCHEDULER_LOG_ID", "0"))
+    ADMIN_NEW_LEAD_LOG_ID: int = int(os.getenv("ADMIN_NEW_LEAD_LOG_ID", "0"))
     
 
     BANK_CBE = os.getenv("BANK_CBE", "")

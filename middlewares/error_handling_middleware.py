@@ -5,34 +5,36 @@ from aiogram import Router, types
 from aiogram.types import ErrorEvent, BufferedInputFile
 from config import settings
 
-router = Router(name="error_handler")
-
+router = Router()
 @router.error()
-async def global_error_handler(event: ErrorEvent): # Removed 'data' from arguments
-    # 1. Log to console
+async def global_error_handler(event: ErrorEvent, **data): # Capture middleware data via **data
+    # 1. Log to console for local debugging
     logging.exception(f"Engine Exception: {event.exception}")
 
-    # 2. Context Extraction
-    # Access 'data' via the event object instead of a positional argument
-    data = event.data 
-    bot = event.bot # ErrorEvent has direct access to the bot
+    # 2. Extract Bot and Update
+    # In Aiogram 3, the bot is usually in the middleware data
+    bot = data.get("bot") 
+    update = event.update
     
-    # Robust user extraction
+    # 3. Robust User/Context Extraction
     user = None
-    if event.update.message:
-        user = event.update.message.from_user
-    elif event.update.callback_query:
-        user = event.update.callback_query.from_user
+    if update.message:
+        user = update.message.from_user
+    elif update.callback_query:
+        user = update.callback_query.from_user
     
     user_id = user.id if user else 0
     username = f"@{user.username}" if user and user.username else "Unknown"
 
-    # 3. Notify Admin Group with Technical Details
-    if settings.ADMIN_ERROR_LOG_ID:
+    # 4. Notify Admin Group
+    if settings.ADMIN_ERROR_LOG_ID and bot:
         try:
-            # Important: format_exception returns the actual traceback of the error that triggered the handler
-            tb_text = "".join(traceback.format_exception(None, event.exception, event.exception.__traceback__))
-            log_file = BufferedInputFile(tb_text.encode(), filename=f"error_8week_{user_id}.txt")
+            # Get the full traceback
+            tb_list = traceback.format_exception(None, event.exception, event.exception.__traceback__)
+            tb_text = "".join(tb_list)
+            
+            # Create a buffered file for the traceback
+            log_file = BufferedInputFile(tb_text.encode(), filename=f"error_{user_id}.txt")
             
             caption = (
                 f"🚨 <b>CHALLENGE ENGINE ERROR</b>\n"
@@ -42,6 +44,7 @@ async def global_error_handler(event: ErrorEvent): # Removed 'data' from argumen
                 f"📝 <b>Brief:</b> <code>{str(event.exception)[:100]}</code>"
             )
             
+            # Use the bot instance from the data to send the document
             await bot.send_document(
                 chat_id=settings.ADMIN_ERROR_LOG_ID,
                 document=log_file,
@@ -49,26 +52,25 @@ async def global_error_handler(event: ErrorEvent): # Removed 'data' from argumen
                 parse_mode="HTML"
             )
         except Exception as log_err:
-            logging.error(f"Failed to log error to Admin: {log_err}")
+            # This shows up in your terminal if the admin send fails
+            logging.error(f"CRITICAL: Failed to send error to admin group: {log_err}")
 
-    # 4. Graceful User Recovery
+    # 5. User Recovery Logic
     try:
-        # Pull language from the injected middleware data
+        # Get language from user data or fallback to 'EN'
         lang = data.get("language", "EN")
         error_msg = (
-            "⚠️ <b>System Update</b>\n\nWe are experiencing heavy traffic. Please wait a moment and try again."
+            "⚠️ <b>System Update</b>\n\nWe are experiencing heavy traffic. Please wait a moment."
             if lang == "EN" else
             "⚠️ <b>ሲስተም ማሻሻያ</b>\n\nከፍተኛ የተጠቃሚ ቁጥር ስላለ እባክዎን ከጥቂት ደቂቃ በኋላ እንደገና ይሞክሩ።"
         )
         
-        if event.update.message:
-            await event.update.message.answer(error_msg, parse_mode="HTML")
-        elif event.update.callback_query:
-            # Using answer() on callback_query.message to avoid "query is too old" errors
-            await event.update.callback_query.message.answer(error_msg, parse_mode="HTML")
-            # Also answer the callback so the loading spinner stops
-            await event.update.callback_query.answer()
+        if update.message:
+            await update.message.answer(error_msg, parse_mode="HTML")
+        elif update.callback_query:
+            await update.callback_query.message.answer(error_msg, parse_mode="HTML")
+            await update.callback_query.answer()
     except Exception:
         pass 
 
-    return True # Prevents the error from propagating further
+    return True

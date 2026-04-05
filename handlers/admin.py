@@ -221,8 +221,16 @@ class AdminStates(StatesGroup):
 # --- 1. KEYBOARDS ---
 def admin_reply_menu():
     builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(text="📊 Stats Summary"))
-    builder.row(types.KeyboardButton(text="⏳ Pending Applications"), types.KeyboardButton(text="🔍 Search User"))
+    # Row 1: The Heavy Hitters
+    builder.row(
+        types.KeyboardButton(text="📊 Stats"),
+        types.KeyboardButton(text="⏳ Pending Applications"), 
+    )
+    # Row 2: Management
+    builder.row(
+        types.KeyboardButton(text="📢 Broadcast"),
+        types.KeyboardButton(text="🔍 Search User")
+    )
     return builder.as_markup(resize_keyboard=True)
 
 def quick_reject_keyboard(user_id):
@@ -257,7 +265,7 @@ def admin_refresh_kb():
 
 # --- 3. THE UNIFIED SUMMARY HANDLER ---
 @router.message(Command("admin"))
-@router.message(F.text == "📊 Stats Summary")
+@router.message(F.text == "📊 Stats")
 async def admin_cmd(message: types.Message, db: Database):
     stats = await db.get_system_stats()
     now = datetime.now()
@@ -541,3 +549,98 @@ async def view_full_profile(callback: types.CallbackQuery, db: Database):
                                     parse_mode="HTML")
     
     await callback.answer()
+    
+
+
+class BroadcastStates(StatesGroup):
+    selecting_target = State()
+    writing_msg = State()
+    confirming = State()
+
+# --- STEP 1: TRIGGER & TARGET SELECTION ---
+@router.message(F.text == "📢 Broadcast") # Restricted to Admin in your middleware/filter
+async def start_broadcast(message: types.Message, state: FSMContext):
+    await state.clear()
+    
+    kb = InlineKeyboardBuilder()
+    kb.row(types.InlineKeyboardButton(text="✅ Verified Only", callback_data="target_verified"))
+    kb.row(types.InlineKeyboardButton(text="❌ Unverified Leads", callback_data="target_unverified"))
+    kb.row(types.InlineKeyboardButton(text="🌐 Everyone (All)", callback_data="target_all"))
+    kb.row(types.InlineKeyboardButton(text="🚫 Cancel", callback_data="cancel_broadcast"))
+    
+    await message.answer(
+        "🎯 <b>BROADCAST ENGINE</b>\n\nSelect the target audience for this transmission:",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.set_state(BroadcastStates.selecting_target)
+
+# --- STEP 2: SHOW STATS & ASK FOR CONTENT ---
+@router.callback_query(BroadcastStates.selecting_target, F.data.startswith("target_"))
+async def select_target(callback: types.CallbackQuery, state: FSMContext, db: Database):
+    target = callback.data.split("_")[1]
+    
+    # Get count from DB (You'll need to implement this method in your DB class)
+    count = await db.get_user_count_by_status(target) 
+    
+    await state.update_data(target=target, count=count)
+    
+    await callback.message.edit_text(
+        f"👥 <b>Target:</b> {target.upper()}\n"
+        f"📊 <b>Reach:</b> {count} users\n\n"
+        "Please send the message content now.\n"
+        "<i>Supports HTML: <b>bold</b>, <i>italic</i>, <a href='...'>links</a>.</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(BroadcastStates.writing_msg)
+
+# --- STEP 3: THE PREVIEW GATEWAY ---
+@router.message(BroadcastStates.writing_msg)
+async def preview_broadcast(message: types.Message, state: FSMContext):
+    content = message.text
+    data = await state.get_data()
+    
+    await state.update_data(message_text=content)
+    
+    confirm_kb = InlineKeyboardBuilder()
+    confirm_kb.row(types.InlineKeyboardButton(text="🚀 CONFIRM & SEND", callback_data="confirm_broadcast"))
+    confirm_kb.row(types.InlineKeyboardButton(text="✍️ Edit Message", callback_data=f"target_{data['target']}"))
+    
+    # We show the admin EXACTLY how it will look
+    await message.answer("🧪 <b>PREVIEW:</b>")
+    await message.answer(content, parse_mode="HTML")
+    await message.answer(
+        f"────────────────────\n"
+        f"⚠️ <b>Ready to send to {data['count']} users?</b>",
+        reply_markup=confirm_kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.set_state(BroadcastStates.confirming)
+
+# --- STEP 4: DISPATCH ---
+@router.callback_query(BroadcastStates.confirming, F.data == "confirm_broadcast")
+async def dispatch_broadcast(callback: types.CallbackQuery, state: FSMContext, db: Database):
+    data = await state.get_data()
+    users = await db.get_users_for_broadcast(data['target']) # Returns list of user_ids
+    
+    await callback.message.edit_text(f"🚀 Dispatching to {len(users)} users... please wait.")
+    
+    success = 0
+    blocked = 0
+    
+    for user_id in users:
+        try:
+            await callback.bot.send_message(user_id, data['message_text'], parse_mode="HTML")
+            success += 1
+            await asyncio.sleep(0.05) # Prevent Flood Limit
+        except Exception:
+            blocked += 1
+            
+    await callback.message.answer(
+        f"🏁 <b>BROADCAST COMPLETE</b>\n\n"
+        f"✅ Delivered: {success}\n"
+        f"🚫 Blocked/Failed: {blocked}",
+        reply_markup=admin_reply_menu(),
+        parse_mode="HTML"
+    )
+    await state.clear()

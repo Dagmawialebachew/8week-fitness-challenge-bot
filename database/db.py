@@ -201,3 +201,31 @@ class Database:
     async def disconnect(self):
         if self._pool:
             await self._pool.close()
+            
+    
+    
+    # --- SQL FIX FOR BROADCAST ENGINE ---
+    async def get_user_count_by_status(self, status: str) -> int:
+        """SQL version of count for PostgreSQL"""
+        if status == "all":
+            query = "SELECT COUNT(*) FROM users"
+            return await self._pool.fetchval(query)
+        elif status == "verified":
+            query = "SELECT COUNT(*) FROM users WHERE registration_step = 'verified'"
+            return await self._pool.fetchval(query)
+        else: # unverified
+            query = "SELECT COUNT(*) FROM users WHERE registration_step != 'verified'"
+            return await self._pool.fetchval(query)
+
+    async def get_users_for_broadcast(self, status: str) -> List[int]:
+        """SQL version of fetching IDs for PostgreSQL"""
+        if status == "all":
+            query = "SELECT telegram_id FROM users"
+        elif status == "verified":
+            query = "SELECT telegram_id FROM users WHERE registration_step = 'verified'"
+        else: # unverified
+            query = "SELECT telegram_id FROM users WHERE registration_step != 'verified'"
+            
+        rows = await self._pool.fetch(query)
+        # Convert list of Records to a simple list of integers
+        return [row['telegram_id'] for row in rows]
