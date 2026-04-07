@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.db import Database
-from handlers.tasks import notify_new_lead, send_to_admin_group
+from handlers.tasks import notify_new_lead, notify_payment_submitted, send_to_admin_group
 from handlers.user_dashboard import get_main_dashboard
 from utils.localization import LEGAL_TEXTS, get_member_card, get_payment_text, get_text
 from keyboards import inline as kb
@@ -13,6 +13,48 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 
 router = Router(name="onboarding")
+
+
+
+async def hydrate_fsm_from_db(user_id: int, state: FSMContext, db: Database):
+    """
+    Fetches user from DB and manually sets the FSM state/data.
+    """
+    user = await db.get_user(user_id)
+    if not user:
+        return None
+
+    step = user.get('registration_step')
+    lang = user.get('language', 'EN')
+
+    # Mapping DB string steps to FSM State objects
+    state_mapping = {
+        'full_name': ChallengeStates.full_name,
+        'phone': ChallengeStates.phone,
+        'gender': ChallengeStates.gender,
+        'age': ChallengeStates.age,
+        'weight': ChallengeStates.weight,
+        'legal': ChallengeStates.legal,
+        'payment': ChallengeStates.payment_upload,
+        'fayda': ChallengeStates.fayda_upload,
+        'photo_front': ChallengeStates.before_photo_front,
+        'photo_side': ChallengeStates.before_photo_side,
+        'photo_rear': ChallengeStates.before_photo_rear,
+    }
+
+    target_state = state_mapping.get(step)
+    if target_state:
+        await state.set_state(target_state)
+        # Re-fill the data so logic like 'lang = data["language"]' doesn't crash
+        await state.update_data(
+            language=lang,
+            full_name=user.get('full_name'),
+            phone_number=user.get('phone_number'),
+            gender=user.get('gender'),
+            age=user.get('age'),
+            current_weight_kg=user.get('current_weight_kg')
+        )
+    return step
 
 
 class ChallengeStates(StatesGroup):
@@ -29,60 +71,70 @@ class ChallengeStates(StatesGroup):
     before_photo_side = State()  
     before_photo_rear = State()
 
+
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, db: Database):
     await state.clear()
-    user_id = message.from_user.id
-    user = await db.get_user(user_id)
+    user = await db.get_user(message.from_user.id)
     
-    # --- 1. HANDLE PAID / VERIFIED / REJECTED ---
-    if user and user.get('registration_step') in ['verification_pending', 'verified', 'rejected']:
-        lang = user.get('language', 'EN')
+    if user:
         step = user.get('registration_step')
-        
-        # Generate the Digital Card text you provided
-        card_text = get_member_card(
-            lang=lang, 
-            user_id=user_id, 
-            name=user.get('full_name', 'Challenger'),
-            registration_step=step
-        )
-        
-        if step == 'verified':
-            # --- 10/10 SENIOR MOVE: Show Card + Your Persistent Dashboard ---
-            await message.answer(card_text, parse_mode="HTML") # The Card
-            return await message.answer(
-                "🏆 <b>DASHBOARD UNLOCKED</b>" if lang == "EN" else "🏆 <b>ዳሽቦርድ ተከፍቷል</b>",
-                reply_markup=get_main_dashboard(lang) # Your Reply Keyboard
+        lang = user.get('language', 'EN')
+
+        # 1. Logic for Finished/Pending Users (Keep your existing code here)
+        if step in ['verification_pending', 'verified', 'rejected']:
+            # ... your card/dashboard logic ...
+            return
+
+        # 2. Logic for Partial Users (The Resume Gate)
+        if step and step != 'start':
+            resume_kb = InlineKeyboardBuilder()
+            btn_text = "🔄 Resume Registration / ቀጥል" if lang == "EN" else "🔄 ምዝገባውን ቀጥል"
+            restart_text = "🆕 Start Over / አዲስ ጀምር" if lang == "EN" else "🆕 እንደገና ጀምር"
+            
+            resume_kb.row(types.InlineKeyboardButton(text=btn_text, callback_data="resume_reg"))
+            resume_kb.row(types.InlineKeyboardButton(text=restart_text, callback_data="restart_full"))
+            
+            msg = (
+                f"👋 <b>Welcome back, {user.get('full_name', 'Challenger')}!</b>\n\n"
+                f"You were at the <b>{step.replace('_', ' ').title()}</b> step. "
+                "Would you like to continue where you left off?"
+            ) if lang == "EN" else (
+                f"👋 <b>እንኳን ደህና መጡ {user.get('full_name', 'ተወዳዳሪ')}!</b>\n\n"
+                f"እርስዎ የነበሩት <b>{step}</b> ደረጃ ላይ ነው። "
+                "ካቆሙበት መቀጠል ይፈልጋሉ?"
             )
+            
+            return await message.answer(msg, reply_markup=resume_kb.as_markup(), parse_mode="HTML")
 
-        elif step == 'rejected':
-            # Inline button for Re-applying
-            retry_kb = InlineKeyboardBuilder()
-            btn = "🔄 Re-apply / ድጋሚ ይሞክሩ" if lang == "EN" else "🔄 ድጋሚ ይሞክሩ"
-            retry_kb.row(types.InlineKeyboardButton(text=btn, callback_data="retry_registration"))
-            return await message.answer(card_text, reply_markup=retry_kb.as_markup(), parse_mode="HTML")
-
-        else:
-            # Verification Pending: Let them refresh
-            refresh_kb = InlineKeyboardBuilder()
-            btn = "🔄 Refresh Status / አድስ" if lang == "EN" else "🔄 አድስ"
-            refresh_kb.row(types.InlineKeyboardButton(text=btn, callback_data="refresh_status"))
-            return await message.answer(card_text, reply_markup=refresh_kb.as_markup(), parse_mode="HTML")
-
-    # --- 2. THE RESUME GATEWAY (Intermediate Progress) ---
-    partial_steps = ['full_name', 'phone', 'gender', 'age', 'weight', 'legal', 'photo_front']
-    if user and user.get('registration_step') in partial_steps:
-        # (Resume logic we brainstormed earlier goes here...)
-        pass
-
-    # --- 3. NEW START ---
-    await message.answer(
-        "<b>CHOOSE YOUR LANGUAGE / ቋንቋ ይምረጡ</b> 🌐", 
-        reply_markup=kb.lang_selection()
-    )
+    # 3. New User Flow
+    await message.answer("<b>CHOOSE YOUR LANGUAGE / ቋንቋ ይምረጡ</b> 🌐", reply_markup=kb.lang_selection())
     await state.set_state(ChallengeStates.language)
+    
 
+@router.message(StateFilter(None))  # Only triggers if FSM is empty
+async def handle_lost_state_users(message: types.Message, state: FSMContext, db: Database):
+    user = await db.get_user(message.from_user.id)
+    if user and user.get('registration_step') not in [None, 'verified', 'completed']:
+        # User is "lost". Hydrate them and tell them to use /start or click resume.
+        await hydrate_fsm_from_db(message.from_user.id, state, db)
+        
+        lang = user.get('language', 'EN')
+        msg = "🔄 <i>Session refreshed. Please type /start to resume your registration.</i>" if lang == "EN" else "🔄 <i>ሲስተሙ ታድሷል። እባክዎን /start ብለው በመጻፍ ምዝገባዎን ይቀጥሉ።</i>"
+        await message.answer(msg, parse_mode="HTML")
+
+@router.callback_query(F.data == "restart_full")
+async def restart_registration(callback: types.CallbackQuery, state: FSMContext, db: Database):
+    await state.clear()
+    # Reset DB step to initial
+    await db.update_user(callback.from_user.id, registration_step='full_name')
+    
+    # Trigger the language selection or name prompt
+    await callback.message.answer("Starting fresh! What is your <b>Full Name</b>?", parse_mode="HTML")
+    await state.set_state(ChallengeStates.full_name)
+    await callback.answer()
+    
+    
 import asyncio
 from aiogram.enums import ChatAction
 @router.callback_query(ChallengeStates.language)
@@ -192,9 +244,9 @@ async def process_phone(message: types.Message, state: FSMContext, db: Database)
     else:
         # ❌ ERROR: Wrong format or typed text
         error_msg = (
-            "❌ <b>Invalid Format!</b>\nPlease enter your number exactly like: <code>0960306801</code>"
+            "❌ <b>Invalid Format!</b>\nPlease enter your number exactly like: <code>092030405060</code>"
             if lang == "EN" else
-            "❌ <b>የተሳሳተ ቁጥር!</b>\nእባክዎን በዚህ መልኩ ያስገቡ፦ <code>0960306801</code>"
+            "❌ <b>የተሳሳተ ቁጥር!</b>\nእባክዎን በዚህ መልኩ ያስገቡ፦ <code>092030405060</code>"
         )
         await message.answer(error_msg, parse_mode="HTML")
 
@@ -335,7 +387,21 @@ async def handle_legal_toggles(callback: types.CallbackQuery, state: FSMContext,
 @router.message(ChallengeStates.payment_upload, F.photo)
 async def process_payment(message: types.Message, state: FSMContext, db: Database):
     payment_photo = message.photo[-1].file_id
+    data = await state.get_data()
     await state.update_data(payment_file_id=payment_photo)
+    
+    await db.create_payment(
+        user_id=message.from_user.id,
+        proof_file_id=payment_photo,
+        amount=1000.00 # Default challenge price
+    )
+    
+    asyncio.create_task(notify_payment_submitted(
+        message.bot, 
+        message.from_user.id, 
+        data, 
+        payment_photo
+    ))
     
     # Save payment to DB immediately
     await db.submit_payment(message.from_user.id, payment_photo)

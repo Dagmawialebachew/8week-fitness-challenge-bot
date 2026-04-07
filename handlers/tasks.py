@@ -111,17 +111,23 @@ async def send_to_admin_group(bot, user_id: int, data: dict, payment_photo: str)
             f"Please check the Database/Logs."
         )
         await bot.send_message(chat_id=admin_group_id, text=error_report)
-        
 async def notify_new_lead(bot, user_id: int, data: dict):
     """
-    Notifies the Leads Group with a clickable Telegram username.
+    Notifies the Leads Group with a LIVE fetched clickable Telegram username/ID.
+    This fires the moment they agree to terms but BEFORE they pay.
     """
     lead_group_id = settings.ADMIN_NEW_LEAD_LOG_ID
     full_name = data.get('full_name', 'Unknown')
-    username = data.get('username')
     
-    # Create the clickable link: @username or 'No Username'
-    user_link = f"@{username}" if username else "<i>(No Username)</i>"
+    # --- LIVE TELEGRAM FETCH (The Elite Way) ---
+    try:
+        chat = await bot.get_chat(user_id)
+        username = chat.username
+        # Use @username if it exists, otherwise the 'God Mode' ID link
+        user_link = f"@{username}" if username else f'<a href="tg://user?id={user_id}">Direct Link</a>'
+    except Exception as e:
+        logger.warning(f"Could not fetch live chat for Lead {user_id}: {e}")
+        user_link = "<i>(Private/Hidden)</i>"
     
     # Mapping Logic for Yes/No
     terms_status = "✅ YES" if data.get('accepted_terms') else "❌ NO"
@@ -142,6 +148,54 @@ async def notify_new_lead(bot, user_id: int, data: dict):
     )
 
     try:
-        await bot.send_message(chat_id=lead_group_id, text=lead_caption, parse_mode="HTML")
+        await bot.send_message(
+            chat_id=lead_group_id, 
+            text=lead_caption, 
+            parse_mode="HTML",
+            disable_web_page_preview=True # Keeps the group clean
+        )
+        logger.info(f"✅ Lead Alert sent for {user_id}")
     except Exception as e:
         logger.error(f"❌ Lead Notify Fail: {e}")
+
+
+async def notify_payment_submitted(bot, user_id: int, data: dict, proof_photo: str):
+    """
+    STARK ALERT: Fetches live Telegram data to ensure the Admin 
+    always has a fresh, clickable link to the user.
+    """
+    admin_group_id = settings.ADMIN_NEW_USER_LOG_ID 
+    full_name = data.get('full_name', 'Unknown')
+    
+    # --- LIVE TELEGRAM FETCH ---
+    try:
+        chat = await bot.get_chat(user_id)
+        username = chat.username
+        user_link = f"@{username}" if username else f'<a href="tg://user?id={user_id}">Direct Link</a>'
+    except Exception as e:
+        logger.warning(f"Could not fetch live chat for {user_id}: {e}")
+        user_link = "<i>(Hidden/Private)</i>"
+
+    # --- CAPTION DESIGN ---
+    caption = (
+        f"💰 <b>NEW PAYMENT SUBMITTED</b> 💳\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>NAME:</b> {full_name.upper()}\n"
+        f"🆔 <b>USER:</b> {user_link}\n"
+        f"📞 <b>PHONE:</b> <code>{data.get('phone_number', 'N/A')}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏳ <b>STATUS:</b> Awaiting Finance Review\n"
+        f"📸 <b>NEXT STEP:</b> User is now taking body photos.\n\n"
+        f"<i>Check the 'Pending Payments' dashboard to verify.</i>"
+    )
+
+    try:
+        await bot.send_photo(
+            chat_id=admin_group_id,
+            photo=proof_photo,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        logger.info(f"✅ Live Payment Alert sent for {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Payment Alert Fail for {user_id}: {e}")

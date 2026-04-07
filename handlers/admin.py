@@ -224,7 +224,7 @@ def admin_reply_menu():
     # Row 1: The Heavy Hitters
     builder.row(
         types.KeyboardButton(text="📊 Stats"),
-        types.KeyboardButton(text="⏳ Pending Applications"), 
+        types.KeyboardButton(text="⏳ Pending"), 
     )
     # Row 2: Management
     builder.row(
@@ -264,70 +264,97 @@ def admin_refresh_kb():
     return builder.as_markup()
 
 # --- 3. THE UNIFIED SUMMARY HANDLER ---
-@router.message(Command("admin"))
-@router.message(F.text == "📊 Stats")
-async def admin_cmd(message: types.Message, db: Database):
-    stats = await db.get_system_stats()
-    now = datetime.now()
-    # In your summary builder
-    from datetime import timedelta
+from datetime import datetime, timezone, timedelta
 
-    # For display purposes (UTC + 3)
-    ethiopia_time = datetime.now(timezone.utc) + timedelta(hours=3)
-    time_str = ethiopia_time.strftime("%H:%M:%S")
+@router.message(F.text == "📊 Stats")
+@router.message(Command("admin"))
+async def admin_cmd(message: types.Message, db: Database):
+    stats = await db.get_funnel_stats()
     
+    # Ethiopia Time (UTC+3)
+    eth_time = datetime.now(timezone.utc) + timedelta(hours=3)
+    time_str = eth_time.strftime("%H:%M:%S")
+
+    # Visual Funnel Builder
+    # We use emojis to create a "Progress Bar" feel
     text = (
         "🛠 <b>ADMIN CONTROL PANEL</b> ⚡️\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>LIVE CHALLENGE SUMMARY</b>\n\n"
-        f"👥 Total Leads: <b>{stats['total']}</b>\n"
-        f"✅ Verified: <b>{stats['verified']}</b>\n"
-        f"⏳ Pending: <b>{stats['pending']}</b>\n"
-        f"💰 Revenue: <b>{stats['revenue']:,} ETB</b>\n"
+        "📈 <b>REGISTRATION FUNNEL</b>\n\n"
+        
+        f"👣 <b>Step 1: Interest</b>\n"
+        f"├ Start: <code>{stats['start']}</code>\n"
+        f"└ Contacted: <code>{stats['phone']}</code>\n\n"
+        
+        f"⚖️ <b>Step 2: Profile Prep</b>\n"
+        f"├ Bio/Weight: <code>{stats['gender'] + stats['age'] + stats['weight']}</code>\n"
+        f"└ Legal Agreed: <code>{stats['legal']}</code>\n\n"
+        
+        f"💰 <b>Step 3: The Money Gate</b>\n"
+        f"└ <b>Awaiting Payment: <code>{stats['payment']}</code></b> ⚠️\n\n"
+        
+        f"📸 <b>Step 4: The Photo Gap</b>\n"
+        f"└ <b>Paid but missing Photos: <code>{stats['photo']}</code></b> 🚨\n\n"
+        
+        "🏆 <b>FINAL RESULTS</b>\n"
+        f"├ ✅ Verified: <b>{stats['verified']}</b>\n"
+        f"├ ⏳ Reviewing: <b>{stats['pending']}</b>\n"
+        f"└ ❌ Rejected: <b>{stats['rejected']}</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"🕒 <i>Last Updated: {time_str} (Just now)</i>\n\n"
-        "<i>Use the menu below to manage the challenge.</i>"
+        f"💰 <b>REVENUE: {stats['revenue']:,} ETB</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🕒 <i>Last Update: {time_str}</i>"
     )
-    
-    # We send ONE message with the stats AND the inline button attached
+
     await message.answer(
         text,
-        reply_markup=admin_refresh_kb(), 
+        reply_markup=admin_refresh_kb(), # Your inline refresh button
         parse_mode="HTML"
     )
     
-    # We also send/ensure the Reply Keyboard is active
-    # If this was triggered by /admin, it will pop up the reply menu
-    if message.text == "/admin":
-        await message.answer("Admin Menu Active 🛠", reply_markup=admin_reply_menu())
+    await message.answer("Admin Menu Active 🛠", reply_markup=admin_reply_menu())
 
 # --- 4. THE REFRESH CALLBACK (Edits the existing card) ---
 @router.callback_query(F.data == "admin_stats_refresh")
 async def refresh_stats_callback(callback: types.CallbackQuery, db: Database):
-    stats = await db.get_system_stats()
+    # 1. Fetch the NEW funnel stats
+    stats = await db.get_funnel_stats()
     
-    # Calculating relative time from the message's original creation date
-    orig_time = callback.message.date
-    relative_str = get_relative_time(orig_time)
+    # 2. Sync Timezones (UTC+3 for Ethiopia)
+    eth_time = datetime.now(timezone.utc) + timedelta(hours=3)
+    now_time_str = eth_time.strftime("%H:%M:%S")
     
-    now_time_str = datetime.now().strftime("%H:%M:%S")
-    
+    # 3. Rebuild the EXACT funnel UI
     text = (
         "🛠 <b>ADMIN CONTROL PANEL</b> ⚡️\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>LIVE CHALLENGE SUMMARY</b>\n\n"
-        f"👥 Total Leads: <b>{stats['total']}</b>\n"
-        f"✅ Verified: <b>{stats['verified']}</b>\n"
-        f"⏳ Pending: <b>{stats['pending']}</b>\n"
-        f"💰 Revenue: <b>{stats['revenue']:,} ETB</b>\n"
+        "📈 <b>REGISTRATION FUNNEL (LIVE)</b>\n\n"
+        
+        f"👣 <b>Step 1: Interest</b>\n"
+        f"├ Start: <code>{stats['start']}</code>\n"
+        f"└ Contacted: <code>{stats['phone']}</code>\n\n"
+        
+        f"⚖️ <b>Step 2: Profile Prep</b>\n"
+        f"├ Bio/Weight: <code>{stats['gender'] + stats['age'] + stats['weight']}</code>\n"
+        f"└ Legal Agreed: <code>{stats['legal']}</code>\n\n"
+        
+        f"💰 <b>Step 3: The Money Gate</b>\n"
+        f"└ <b>Awaiting Payment: <code>{stats['payment']}</code></b> ⚠️\n\n"
+        
+        f"📸 <b>Step 4: The Photo Gap</b>\n"
+        f"└ <b>Paid but missing Photos: <code>{stats['photo']}</code></b> 🚨\n\n"
+        
+        "🏆 <b>FINAL RESULTS</b>\n"
+        f"├ ✅ Verified: <b>{stats['verified']}</b>\n"
+        f"├ ⏳ Reviewing: <b>{stats['pending']}</b>\n"
+        f"└ ❌ Rejected: <b>{stats['rejected']}</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
-        f"🕒 <i>Last Refreshed: {now_time_str}</i>\n"
-        f"⏳ <i>Original Post: {relative_str}</i>\n"
-        "━━━━━━━━━━━━━━━━━━"
+        f"💰 <b>REVENUE: {stats['revenue']:,} ETB</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🕒 <i>Last Refreshed: {now_time_str}</i>"
     )
     
     try:
-        # Edit the same message with updated stats and the same button
         await callback.message.edit_text(
             text, 
             reply_markup=admin_refresh_kb(), 
@@ -335,7 +362,7 @@ async def refresh_stats_callback(callback: types.CallbackQuery, db: Database):
         )
         await callback.answer("Stats Updated! 🔄")
     except Exception:
-        # If stats haven't changed, Telegram throws an error on edit_text
+        # This triggers if stats are exactly the same (Telegram doesn't allow 'editing' to identical text)
         await callback.answer("No new data yet.")
         
 # --- 4. SEARCH & CONSISTENT CARD ---
@@ -436,7 +463,118 @@ async def handle_quick_reject(callback: types.CallbackQuery, db: Database):
 
 # --- PENDING QUEUE: THE GRACEFUL TRIAGE ---
 
-@router.message(F.text == "⏳ Pending Applications")
+
+@router.message(F.text == "⏳ Pending")
+async def show_pending_menu(message: types.Message):
+    await message.answer(
+        "📂 <b>PENDING MANAGEMENT</b>\n"
+        "Choose a category to review:",
+        reply_markup=pending_management_menu(),
+        parse_mode="HTML"
+    )
+    
+@router.message(F.text == "💰 P. Payments")
+async def show_pending_payments(message: types.Message, db: Database):
+    # Fetch payments where status is 'pending'
+    query = """
+        SELECT p.*, u.full_name, u.phone_number, u.telegram_id as user_id
+        FROM payments p 
+        JOIN users u ON p.user_id = u.telegram_id 
+        WHERE p.status = 'pending'
+        ORDER BY p.created_at ASC
+    """
+    pending_pays = await db._pool.fetch(query)
+
+    if not pending_pays:
+        return await message.answer("✅ <b>All payments verified!</b>", parse_mode="HTML")
+
+    await message.answer(f"💳 <b>{len(pending_pays)} Unverified Receipts:</b>", parse_mode="HTML")
+
+    for pay in pending_pays[:5]:
+        user_id = pay['user_id']
+        
+        # --- LIVE TELEGRAM FETCH FOR CLICKABLE LINK ---
+        try:
+            chat = await message.bot.get_chat(user_id)
+            username = chat.username
+            # If they have a @username, use it. If not, use the tg:// link (God Mode)
+            user_link = f"@{username}" if username else f'<a href="tg://user?id={user_id}">Direct Link</a>'
+        except Exception:
+            # Fallback if the bot can't fetch the chat info
+            user_link = "<i>(Private/Hidden)</i>"
+
+        pay_card = (
+            f"💰 <b>RECEIPT REVIEW</b>\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"👤 <b>USER:</b> {pay['full_name'].upper()}\n"
+            f"🆔 <b>USERNAME:</b> {user_link}\n"
+            f"📞 <b>PHONE:</b> <code>{pay['phone_number']}</code>\n"
+            f"💵 <b>AMOUNT:</b> {pay['amount']} ETB\n"
+            f"📅 <b>SENT:</b> {pay['created_at'].strftime('%Y-%m-%d %H:%M')}\n"
+            f"━━━━━━━━━━━━━━"
+        )
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✅ Mark Paid", callback_data=f"pay_approve_{pay['id']}")
+        builder.button(text="❌ Bad Receipt", callback_data=f"pay_reject_{pay['id']}")
+        builder.row(types.InlineKeyboardButton(text="🔍 View Application", callback_data=f"view_prof_{user_id}"))
+
+        # Safety check for the photo before sending
+        photo_id = pay['proof_file_id']
+        try:
+            if photo_id:
+                await message.answer_photo(
+                    photo=photo_id,
+                    caption=pay_card,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+            else:
+                await message.answer(
+                    pay_card + "\n⚠️ <i>Receipt photo missing!</i>",
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"Failed to send payment card for {user_id}: {e}")
+            
+
+@router.message(F.text == "🔙 Back")
+async def back_to_admin_main(message: types.Message, db: Database):
+    """
+    Returns the admin to the main dashboard and restores 
+    the original Admin Reply Keyboard.
+    """
+    # 1. We reuse the admin_cmd logic to show the fresh funnel
+    await admin_cmd(message, db)
+    
+    # 2. Optionally, send a small confirmation toast/alert
+    # (The main admin_cmd already sends the reply_markup=admin_reply_menu())
+
+@router.callback_query(F.data.startswith("pay_approve_"))
+async def approve_payment_only(callback: types.CallbackQuery, db: Database):
+    pay_id = int(callback.data.split("_")[2])
+    
+    # 1. Update Payment Table
+    # 2. Find associated user and mark as is_paid=True
+    query = """
+        WITH updated_pay AS (
+            UPDATE payments SET status = 'approved', processed_at = CURRENT_TIMESTAMP 
+            WHERE id = $1 RETURNING user_id
+        )
+        UPDATE users SET is_paid = TRUE 
+        WHERE telegram_id = (SELECT user_id FROM updated_pay)
+        RETURNING full_name;
+    """
+    user_name = await db._pool.fetchval(query, pay_id)
+
+    await callback.message.edit_caption(
+        caption=callback.message.caption + f"\n\n✅ <b>APPROVED BY ADMIN</b>",
+        parse_mode="HTML"
+    )
+    await callback.answer(f"Payment for {user_name} verified!")
+
+@router.message(F.text == "📂 P. Applications")
 async def show_pending_queue(message: types.Message, db: Database):
     pending_users = await db.get_pending_users()
     
@@ -474,6 +612,16 @@ async def show_pending_queue(message: types.Message, db: Database):
     if count > 5:
         await message.answer(f"<i>...and {count - 5} more. Clear these first!</i>")
 
+
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
+def pending_management_menu():
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="📂 P. Applications")
+    builder.button(text="💰 P. Payments")
+    builder.button(text="🔙 Back")
+    builder.adjust(2, 1) # 2 buttons in first row, 1 in second
+    return builder.as_markup(resize_keyboard=True)
 
 
 from aiogram.utils.media_group import MediaGroupBuilder

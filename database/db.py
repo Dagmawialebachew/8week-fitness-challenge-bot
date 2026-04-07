@@ -68,6 +68,14 @@ class Database:
     def __init__(self, dsn: str):
         self.dsn = dsn
         self._pool: Optional[asyncpg.Pool] = None
+        
+    
+    async def create_payment(self, user_id: int, proof_file_id: str, amount: float):
+        query = """
+            INSERT INTO payments (user_id, proof_file_id, amount, status, created_at)
+            VALUES ($1, $2, $3, 'pending', CURRENT_TIMESTAMP)
+        """
+        await self._pool.execute(query, user_id, proof_file_id, amount)
 
     async def connect(self):
         """Initializes the connection pool for high-concurrency."""
@@ -90,6 +98,44 @@ class Database:
                 VALUES ('entry_fee', 1000.00) 
                 ON CONFLICT DO NOTHING;
             """)
+            
+    
+    async def get_funnel_stats(self) -> Dict[str, Any]:
+        # 1. Get raw counts per step
+        query = """
+            SELECT registration_step, COUNT(*) as count 
+            FROM users 
+            GROUP BY registration_step
+        """
+        rows = await self._pool.fetch(query)
+        
+        # Initialize funnel with 0s
+        stats = {
+            'start': 0, 'phone': 0, 'gender': 0, 'age': 0, 
+            'weight': 0, 'legal': 0, 'payment': 0, 'photo': 0, 
+            'verified': 0, 'rejected': 0, 'total': 0, 'revenue': 0
+        }
+
+        for row in rows:
+            step = row['registration_step']
+            # Map photo steps into one 'photo' bucket for simplicity
+            if 'photo' in step:
+                stats['photo'] += row['count']
+            elif step in stats:
+                stats[step] += row['count']
+            
+            stats['total'] += row['count']
+
+        # 2. Get Revenue (Approved payments only)
+        rev_query = "SELECT SUM(amount) FROM payments WHERE status = 'approved'"
+        revenue = await self._pool.fetchval(rev_query)
+        stats['revenue'] = float(revenue or 0.0)
+
+        # 3. Get pending verification count
+        pending_query = "SELECT COUNT(*) FROM users WHERE registration_step = 'verification_pending'"
+        stats['pending'] = await self._pool.fetchval(pending_query)
+
+        return stats
 
     # --- USER ENGINE ---
     async def get_user(self, telegram_id: int) -> Optional[asyncpg.Record]:

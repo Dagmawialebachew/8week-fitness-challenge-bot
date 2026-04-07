@@ -201,30 +201,39 @@ from aiogram import Router, F, types, Bot
 # 1. Update the decorator with Filters
 @router.message(
     StateFilter(None),           # ONLY catch if the user is NOT in an active FSM state
+    F.chat.type == "private",    # 🚨 CRITICAL: Only trigger in Direct Messages
     ~Command("start"),           # EXCLUDE the /start command
-    F.text                       # ONLY catch Text (ignores photos/files)
+    ~Command("admin"),           # EXCLUDE admin commands too
+    F.text                       # ONLY catch Text
 )
 async def forward_random_signals(message: types.Message, bot: Bot, db: Database):
     """
-    Forwards random text to Admin ONLY if the user is idling.
+    Forwards random text to Admin ONLY if the user is in a Private DM and idling.
     """
-    # 1. Get user data safely
+    # 1. Check if it's a known Admin sending a message (Optional Safety)
+    # If an Admin types something in the bot's DM, we don't want to forward it to themselves.
+    admin_id = 1131741322
+    if message.from_user.id == admin_id:
+        return
+
     user = await db.get_user(message.from_user.id)
     # Default to 'EN' if user doesn't exist in DB yet
     lang = (user.get('language') if user else 'EN').upper()
     
-    # 2. Premium Admin Notification (Clean UI)
-    admin_id = 1131741322
+    # 2. Premium Admin Notification
     user_info = (
         f"👤 <b>User:</b> {message.from_user.full_name}\n"
         f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
         f"🔗 <b>Username:</b> @{message.from_user.username or 'None'}"
     )
     
-    await bot.send_message(admin_id, f"<b>📩 Random Signal:*</b>\n\n{user_info}\n\n<b>Content:</b>")
-    await message.forward(admin_id)
+    try:
+        await bot.send_message(admin_id, f"<b>📩 Random Signal:</b>\n\n{user_info}\n\n<b>Content:</b>", parse_mode="HTML")
+        await message.forward(admin_id)
+    except Exception as e:
+        logger.error(f"Failed to forward signal to admin: {e}")
 
-    # 3. Personalized Response based on Language
+    # 3. Personalized Response
     if lang == "AM":
         reply_text = (
             "ተጨማሪ ጥያቄ ወይም እርዳታ ካስፈለገዎት\n"
@@ -232,8 +241,8 @@ async def forward_random_signals(message: types.Message, bot: Bot, db: Database)
         )
     else:
         reply_text = (
-            "If you have any specific questions or issues,\n "
+            "If you have any specific questions or issues,\n"
             "please contact our support team here: <b>@EWCSupportBot 😊</b>"
         )
 
-    await message.answer(reply_text)
+    await message.answer(reply_text, parse_mode="HTML")
