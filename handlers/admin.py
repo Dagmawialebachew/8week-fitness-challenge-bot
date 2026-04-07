@@ -537,7 +537,66 @@ async def show_pending_payments(message: types.Message, db: Database):
                 )
         except Exception as e:
             logger.error(f"Failed to send payment card for {user_id}: {e}")
-            
+
+
+@router.callback_query(F.data.startswith("pay_reject_"))
+async def reject_payment(callback: types.CallbackQuery, db: Database):
+    payment_id = int(callback.data.replace("pay_reject_", ""))
+    
+    # 1. Fetch user info before updating so we can notify them
+    query_user = """
+        SELECT user_id, amount FROM payments WHERE id = $1
+    """
+    payment_data = await db._pool.fetchrow(query_user, payment_id)
+    
+    if not payment_data:
+        return await callback.answer("❌ Record not found.")
+
+    user_id = payment_data['user_id']
+    
+    # 2. Update DB status to 'rejected'
+    await db._pool.execute(
+        "UPDATE payments SET status = 'rejected' WHERE id = $1", 
+        payment_id
+    )
+    
+    # Optional: Reset the user's registration step in the users table 
+    # so they see the 'Retry' button when they type /start
+    await db.update_user(user_id, registration_step='rejected')
+
+    # 3. Notify the User (Personalized)
+    user = await db.get_user(user_id)
+    lang = user.get('language', 'EN')
+    
+    rejection_text = (
+        "❌ <b>Payment Not Verified</b>\n\n"
+        "Your receipt was rejected. This usually happens if the screenshot is blurry, "
+        "incorrect, or already used. Please try again with a clear receipt."
+    ) if lang == "EN" else (
+        "❌ <b>ክፍያዎ አልተረጋገጠም</b>\n\n"
+        "የላኩት ደረሰኝ ተቀባይነት አላገኘም። ምናልባት ደረሰኙ ግልጽ ካልሆነ ወይም የተሳሳተ ከሆነ ሊሆን ይችላል። "
+        "እባክዎን ትክክለኛውን ደረሰኝ በድጋሚ ይላኩ።"
+    )
+
+    retry_kb = InlineKeyboardBuilder()
+    retry_kb.button(text="🔄 Try Again / ድጋሚ ሞክር", callback_data="resume_reg")
+
+    try:
+        await callback.bot.send_message(
+            user_id, 
+            rejection_text, 
+            reply_markup=retry_kb.as_markup(), 
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Could not notify user {user_id} of rejection: {e}")
+
+    # 4. Update Admin UI (Edit the original message to show it's rejected)
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n🔴 <b>STATUS: REJECTED</b>",
+        parse_mode="HTML"
+    )
+    await callback.answer("Entry Rejected ❌")
 
 @router.message(F.text == "🔙 Back")
 async def back_to_admin_main(message: types.Message, db: Database):

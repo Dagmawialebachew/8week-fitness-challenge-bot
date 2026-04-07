@@ -512,6 +512,7 @@ async def resume_registration(callback: types.CallbackQuery, state: FSMContext, 
         'weight': ChallengeStates.weight,
         'legal': ChallengeStates.legal,
         'payment': ChallengeStates.payment_upload, # Changed order
+        'rejected': ChallengeStates.payment_upload, # <--- ADD THIS LINE
         'fayda': ChallengeStates.fayda_upload,     # Changed order
         'photo_front': ChallengeStates.before_photo_front,
         'photo_side': ChallengeStates.before_photo_side,
@@ -536,6 +537,7 @@ async def resume_registration(callback: types.CallbackQuery, state: FSMContext, 
     prompts = {
         'payment': get_payment_text(lang),
         'fayda': get_text(lang, "ask_fayda"),
+        'rejected': get_payment_text(lang), # <--- ADD THIS LINE
         'photo_front': get_text(lang, "ask_photo_front"),
         'photo_side': get_text(lang, "ask_photo_side"),
         'photo_rear': get_text(lang, "ask_photo_rear")
