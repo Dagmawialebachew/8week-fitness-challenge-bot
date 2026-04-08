@@ -32,35 +32,53 @@ from datetime import timedelta
 async def approve_user(callback: types.CallbackQuery, db: Database):
     user_id = int(callback.data.split("_")[-1]) 
     
+    # 1. FETCH FULL CONTEXT (User + Payment Status)
     user = await db.get_user(user_id)
+    # Check if there's a payment record and what its status is
+    # Assuming you have a method like get_payment_by_user or similar
+    payment = await db._pool.fetchrow("SELECT status FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1", user_id)
+
     if not user:
         return await callback.answer("❌ User not found.", show_alert=True)
-    
+
+    # 🛑 THE SAFETY CHECK
+    # If the coach tries to approve but the payment was already rejected or doesn't exist
+    if not payment or payment['status'] == 'rejected':
+        return await callback.answer(
+            "⚠️ Cannot Approve: This user has no valid payment or was previously rejected.", 
+            show_alert=True
+        )
+
     lang = user.get('language', 'EN')
     full_name = user.get('full_name', 'Participant')
 
-    # 1. Update Database
+    # 2. Update Database (Atomic Move)
+    # We set 'is_paid' to True and move the step to 'verified'
     await db.update_user(user_id, registration_step='verified', is_paid=True)
+    # Update the payment record specifically to 'verified' too
+    await db._pool.execute("UPDATE payments SET status = 'verified' WHERE user_id = $1 AND status = 'pending'", user_id)
 
-    # 2. Update Admin UI
+    # 3. Update Admin UI (Visual Confirmation)
     try:
-        await callback.message.edit_text(
-            f"{callback.message.text}\n\n✅ <b>APPROVED BY:</b> @{callback.from_user.username}",
+        # We use a checkmark and the admin's name so other admins know who did it
+        await callback.message.edit_caption(
+            caption=f"{callback.message.caption}\n\n✅ <b>APPROVED BY:</b> @{callback.from_user.username or callback.from_user.full_name}",
             parse_mode="HTML",
-            reply_markup=None 
+            reply_markup=None # Remove buttons so they can't click again
         )
     except Exception:
         pass
 
-    # 3. Handle Invite Links
+    # 4. Handle Invite Links (The "Golden Ticket")
+    # Using your existing logic to generate dynamic invite links
     try:
         group_invite = await callback.bot.create_chat_invite_link(
             chat_id=settings.CHALLENGE_GROUP_ID,
-            name=f"Group Access: {full_name}",
-            creates_join_request=True
+            name=f"Access: {full_name}",
+            member_limit=1 # Single use for extra security
         )
         group_url = group_invite.invite_link
-    except Exception as e:
+    except Exception:
         group_url = settings.CHALLENGE_GROUP_INVITE_LINK
 
     try:
