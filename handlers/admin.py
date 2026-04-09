@@ -56,7 +56,13 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
     # We set 'is_paid' to True and move the step to 'verified'
     await db.update_user(user_id, registration_step='verified', is_paid=True)
     # Update the payment record specifically to 'verified' too
-    await db._pool.execute("UPDATE payments SET status = 'verified' WHERE user_id = $1 AND status = 'pending'", user_id)
+    # Inside your approve handler
+    admin_identity = callback.from_user.username or callback.from_user.full_name
+    pay_id = payment['id']
+    await db._pool.execute(
+        "UPDATE payments SET status = 'approved', processed_by = $1, processed_at = NOW() WHERE id = $2",
+        admin_identity, pay_id
+    )
 
     # 3. Update Admin UI (Visual Confirmation)
     try:
@@ -555,16 +561,14 @@ async def show_pending_payments(message: types.Message, db: Database):
                 )
         except Exception as e:
             logger.error(f"Failed to send payment card for {user_id}: {e}")
-
-
+            
+            
 @router.callback_query(F.data.startswith("pay_reject_"))
 async def reject_payment(callback: types.CallbackQuery, db: Database):
     payment_id = int(callback.data.replace("pay_reject_", ""))
     
-    # 1. Fetch user info before updating so we can notify them
-    query_user = """
-        SELECT user_id, amount FROM payments WHERE id = $1
-    """
+    # 1. Fetch user info
+    query_user = "SELECT user_id FROM payments WHERE id = $1"
     payment_data = await db._pool.fetchrow(query_user, payment_id)
     
     if not payment_data:
@@ -572,29 +576,39 @@ async def reject_payment(callback: types.CallbackQuery, db: Database):
 
     user_id = payment_data['user_id']
     
+    # FIX 1: In a callback handler, use callback.from_user (not message.from_user)
+    admin_identity = callback.from_user.username or callback.from_user.full_name
+    
     # 2. Update DB status to 'rejected'
+    # FIX 2: Variable name must be payment_id (lowercase 'i')
     await db._pool.execute(
-        "UPDATE payments SET status = 'rejected' WHERE id = $1", 
-        payment_id
+        """
+        UPDATE payments 
+        SET status = 'rejected', processed_by = $1, processed_at = NOW() 
+        WHERE id = $2
+        """,
+        admin_identity, payment_id
     )
     
-    # Optional: Reset the user's registration step in the users table 
-    # so they see the 'Retry' button when they type /start
+    # Update registration step so /start or 'Resume' works correctly
     await db.update_user(user_id, registration_step='rejected')
 
-    # 3. Notify the User (Personalized)
+    # 3. Notify the User (Bilingual)
     user = await db.get_user(user_id)
     lang = user.get('language', 'EN')
     
-    rejection_text = (
-        "❌ <b>Payment Not Verified</b>\n\n"
-        "Your receipt was rejected. This usually happens if the screenshot is blurry, "
-        "incorrect, or already used. Please try again with a clear receipt."
-    ) if lang == "EN" else (
-        "❌ <b>ክፍያዎ አልተረጋገጠም</b>\n\n"
-        "የላኩት ደረሰኝ ተቀባይነት አላገኘም። ምናልባት ደረሰኙ ግልጽ ካልሆነ ወይም የተሳሳተ ከሆነ ሊሆን ይችላል። "
-        "እባክዎን ትክክለኛውን ደረሰኝ በድጋሚ ይላኩ።"
-    )
+    if lang == "EN":
+        rejection_text = (
+            "❌ <b>Payment Not Verified</b>\n\n"
+            "Your receipt was rejected. This usually happens if the screenshot is blurry, "
+            "incorrect, or already used. Please try again with a clear receipt."
+        )
+    else:
+        rejection_text = (
+            "❌ <b>ክፍያዎ አልተረጋገጠም</b>\n\n"
+            "የላኩት ደረሰኝ ተቀባይነት አላገኘም። ምናልባት ደረሰኙ ግልጽ ካልሆነ ወይም የተሳሳተ ከሆነ ሊሆን ይችላል። "
+            "እባክዎን ትክክለኛውን ደረሰኝ በድጋሚ ይላኩ።"
+        )
 
     retry_kb = InlineKeyboardBuilder()
     retry_kb.button(text="🔄 Try Again / ድጋሚ ሞክር", callback_data="resume_reg")
@@ -607,13 +621,19 @@ async def reject_payment(callback: types.CallbackQuery, db: Database):
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(f"Could not notify user {user_id} of rejection: {e}")
+        logging.error(f"Could not notify user {user_id} of rejection: {e}")
 
-    # 4. Update Admin UI (Edit the original message to show it's rejected)
-    await callback.message.edit_caption(
-        caption=callback.message.caption + "\n\n🔴 <b>STATUS: REJECTED</b>",
-        parse_mode="HTML"
-    )
+    # 4. Update Admin UI
+    # We remove the buttons and add the admin's name for accountability
+    try:
+        await callback.message.edit_caption(
+            caption=f"{callback.message.caption}\n\n🔴 <b>REJECTED BY:</b> @{admin_identity}",
+            parse_mode="HTML",
+            reply_markup=None # Removes the buttons so no one clicks again
+        )
+    except Exception:
+        pass
+        
     await callback.answer("Entry Rejected ❌")
 
 @router.message(F.text == "🔙 Back")
@@ -627,28 +647,47 @@ async def back_to_admin_main(message: types.Message, db: Database):
     
     # 2. Optionally, send a small confirmation toast/alert
     # (The main admin_cmd already sends the reply_markup=admin_reply_menu())
-
 @router.callback_query(F.data.startswith("pay_approve_"))
 async def approve_payment_only(callback: types.CallbackQuery, db: Database):
+    # 1. Extract and ID Check
     pay_id = int(callback.data.split("_")[2])
+    admin_identity = callback.from_user.username or callback.from_user.full_name
     
-    # 1. Update Payment Table
-    # 2. Find associated user and mark as is_paid=True
+    # 2. Check current status to prevent "Double Processing"
+    status = await db._pool.fetchval("SELECT status FROM payments WHERE id = $1", pay_id)
+    if status == 'approved':
+        return await callback.answer("✅ Already approved!")
+
+    # 3. Atomic Update (Payments + Users)
+    # Added 'processed_by' to the query for the Audit Log
     query = """
         WITH updated_pay AS (
-            UPDATE payments SET status = 'approved', processed_at = CURRENT_TIMESTAMP 
-            WHERE id = $1 RETURNING user_id
+            UPDATE payments 
+            SET status = 'approved', 
+                processed_at = CURRENT_TIMESTAMP,
+                processed_by = $2
+            WHERE id = $1 AND status = 'pending'
+            RETURNING user_id
         )
-        UPDATE users SET is_paid = TRUE 
+        UPDATE users 
+        SET is_paid = TRUE 
         WHERE telegram_id = (SELECT user_id FROM updated_pay)
         RETURNING full_name;
     """
-    user_name = await db._pool.fetchval(query, pay_id)
+    user_name = await db._pool.fetchval(query, pay_id, admin_identity)
 
+    if not user_name:
+        # This triggers if the payment status was changed by another admin 
+        # between the 'fetchval' and the 'UPDATE'
+        return await callback.answer("❌ Payment already processed by another admin.")
+
+    # 4. Update Admin UI
     await callback.message.edit_caption(
-        caption=callback.message.caption + f"\n\n✅ <b>APPROVED BY ADMIN</b>",
-        parse_mode="HTML"
+        caption=f"{callback.message.caption}\n\n✅ <b>APPROVED BY:</b> @{admin_identity}",
+        parse_mode="HTML",
+        reply_markup=None # Clean UI: buttons disappear instantly
     )
+    
     await callback.answer(f"Payment for {user_name} verified!")
 
 @router.message(F.text == "📂 P. Applications")
@@ -691,16 +730,112 @@ async def show_pending_queue(message: types.Message, db: Database):
 
 
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-
 def pending_management_menu():
     builder = ReplyKeyboardBuilder()
     builder.button(text="📂 P. Applications")
     builder.button(text="💰 P. Payments")
+    builder.button(text="📜 All Trans.")  # New Log Button
     builder.button(text="🔙 Back")
-    builder.adjust(2, 1) # 2 buttons in first row, 1 in second
+    builder.adjust(2, 2) # Rows of 2, 2
     return builder.as_markup(resize_keyboard=True)
 
+from math import ceil
+from aiogram.types import InputMediaPhoto
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+@router.message(F.text == "📜 All Trans.")
+async def show_all_transactions(message: types.Message, db: Database, page: int = 1):
+    # OFFSET logic for "1 Card at a Time" (The Premium approach)
+    limit = 1
+    offset = (page - 1) * limit
+
+    # 1. FETCH DATA (Joined User + Payment + Proof Image)
+    query = """
+        SELECT p.id, p.status, p.processed_by, p.processed_at, 
+               u.full_name, p.amount, p.proof_file_id, u.telegram_id
+        FROM payments p
+        JOIN users u ON p.user_id = u.telegram_id
+        ORDER BY p.created_at DESC
+        LIMIT $1 OFFSET $2
+    """
+    count_query = "SELECT COUNT(*) FROM payments"
+    
+    row = await db._pool.fetchrow(query, limit, offset)
+    total_count = await db._pool.fetchval(count_query) or 0
+
+    if not row:
+        return await message.answer("<b>× ARCHIVE_EMPTY // NO_RECORDS_FOUND</b>")
+
+    # 2. 2030 CINEMATIC CAPTION
+    # Status styling for instant recognition
+    status_map = {
+        'approved': "🟢 VERIFIED_SUCCESS",
+        'rejected': "🔴 DECLINED_VOID",
+        'pending':  "🟡 IN_REVIEW"
+    }
+    status_label = status_map.get(row['status'], "⚪ UNKNOWN")
+    
+    caption = (
+        f"<b>── TRANSACTION_RECORD ──</b>\n"
+        f"👤 <b>CLIENT:</b> {row['full_name'].upper()}\n"
+        f"🆔 <b>TG_ID:</b> <code>{row['telegram_id']}</code>\n"
+        f"💰 <b>VALUE:</b> <code>{row['amount']} ETB</code>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📑 <b>STATUS:</b> {status_label}\n"
+        f"🕒 <b>DATE:</b> {row['processed_at'].strftime('%Y/%m/%d %H:%M') if row['processed_at'] else 'PENDING'}\n"
+        f"👨‍💻 <b>ADMIN:</b> {row['processed_by'] or 'AUTO_SYSTEM'}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<code>LOG_ENTRY: {page} // TOTAL_ENTRIES: {total_count}</code>"
+    )
+
+    # 3. DYNAMIC NAVIGATION
+    builder = InlineKeyboardBuilder()
+    
+    # Navigation Row (Arrow Emojis + Modern Text)
+    nav_row = []
+    if page > 1:
+        nav_row.append(types.InlineKeyboardButton(text="« PREV", callback_data=f"alltrans_p_{page-1}"))
+    if page < total_count:
+        nav_row.append(types.InlineKeyboardButton(text="NEXT »", callback_data=f"alltrans_p_{page+1}"))
+    
+    if nav_row:
+        builder.row(*nav_row)
+
+    # 4. EXECUTION (The UI Switcher)
+    try:
+        # If message comes from a callback (Next/Prev), we swap the media
+        if message.from_user.is_bot:
+            await message.edit_media(
+                media=InputMediaPhoto(
+                    media=row['proof_file_id'], 
+                    caption=caption, 
+                    parse_mode="HTML"
+                ),
+                reply_markup=builder.as_markup()
+            )
+        else:
+            # If it's a fresh text command, send new photo
+            await message.answer_photo(
+                photo=row['proof_file_id'],
+                caption=caption,
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            await message.answer("🔄 Record current.")
+        else:
+            logging.error(f"UI Update Failed: {e}")
+
+# 5. THE CALLBACK ROUTER
+@router.callback_query(F.data.startswith("alltrans_p_"))
+async def paginate_transactions(callback: types.CallbackQuery, db: Database):
+    page = int(callback.data.split("_")[-1])
+    await show_all_transactions(callback.message, db, page=page)
+    await callback.answer()
+    
+    
 from aiogram.utils.media_group import MediaGroupBuilder
 @router.callback_query(F.data.startswith("view_prof_"))
 async def view_full_profile(callback: types.CallbackQuery, db: Database):

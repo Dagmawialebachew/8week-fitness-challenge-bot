@@ -62,6 +62,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS before_photo_file_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS  photo_front_file_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_side_file_id TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS  photo_rear_file_id TEXT;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS processed_by TEXT; 
+-- Stores the @username or Name of the admin who clicked approve/reject
 """
 
 class Database:
