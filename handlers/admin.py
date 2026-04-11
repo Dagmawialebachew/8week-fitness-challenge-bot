@@ -32,20 +32,22 @@ from datetime import timedelta
 async def approve_user(callback: types.CallbackQuery, db: Database):
     user_id = int(callback.data.split("_")[-1]) 
     
-    # 1. FETCH FULL CONTEXT (User + Payment Status)
+    # 1. FETCH FULL CONTEXT (Added 'id' to the SELECT)
     user = await db.get_user(user_id)
-    # Check if there's a payment record and what its status is
-    # Assuming you have a method like get_payment_by_user or similar
-    payment = await db._pool.fetchrow("SELECT status FROM payments WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1", user_id)
+    
+    # CRITICAL FIX: Include 'id' here so it exists in the payment object
+    payment = await db._pool.fetchrow(
+        "SELECT id, status FROM payments WHERE user_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1", 
+        user_id
+    )
 
     if not user:
         return await callback.answer("❌ User not found.", show_alert=True)
 
     # 🛑 THE SAFETY CHECK
-    # If the coach tries to approve but the payment was already rejected or doesn't exist
-    if not payment or payment['status'] == 'rejected':
+    if not payment:
         return await callback.answer(
-            "⚠️ Cannot Approve: This user has no valid payment or was previously rejected.", 
+            "⚠️ Cannot Approve: No pending payment found for this user.", 
             show_alert=True
         )
 
@@ -53,12 +55,13 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
     full_name = user.get('full_name', 'Participant')
 
     # 2. Update Database (Atomic Move)
-    # We set 'is_paid' to True and move the step to 'verified'
+    # Set 'is_paid' to True and move the step to 'verified'
     await db.update_user(user_id, registration_step='verified', is_paid=True)
-    # Update the payment record specifically to 'verified' too
-    # Inside your approve handler
+    
+    # Audit trail: who processed this and which specific payment ID
     admin_identity = callback.from_user.username or callback.from_user.full_name
-    pay_id = payment['id']
+    pay_id = payment['id'] # This will now work without KeyError
+    
     await db._pool.execute(
         "UPDATE payments SET status = 'approved', processed_by = $1, processed_at = NOW() WHERE id = $2",
         admin_identity, pay_id
@@ -66,11 +69,10 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
 
     # 3. Update Admin UI (Visual Confirmation)
     try:
-        # We use a checkmark and the admin's name so other admins know who did it
         await callback.message.edit_caption(
-            caption=f"{callback.message.caption}\n\n✅ <b>APPROVED BY:</b> @{callback.from_user.username or callback.from_user.full_name}",
+            caption=f"{callback.message.caption}\n\n✅ <b>APPROVED BY:</b> @{admin_identity}",
             parse_mode="HTML",
-            reply_markup=None # Remove buttons so they can't click again
+            reply_markup=None # Kill buttons to prevent double-click
         )
     except Exception:
         pass
