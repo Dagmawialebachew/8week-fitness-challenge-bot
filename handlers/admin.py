@@ -69,13 +69,27 @@ async def approve_user(callback: types.CallbackQuery, db: Database):
 
     # 3. Update Admin UI (Visual Confirmation)
     try:
+        # Get existing caption safely
+        current_caption = callback.message.caption or ""
+        new_text = f"\n\n✅ <b>APPROVED BY:</b> @{admin_identity}"
+        
+        # Check if the new caption will be too long
+        if len(current_caption) + len(new_text) > 1024:
+            # If too long, just show the approval status without the old info
+            final_caption = f"✅ <b>APPROVED BY:</b> @{admin_identity}\nUser: {full_name}"
+        else:
+            final_caption = f"{current_caption}{new_text}"
+
         await callback.message.edit_caption(
-            caption=f"{callback.message.caption}\n\n✅ <b>APPROVED BY:</b> @{admin_identity}",
+            caption=final_caption,
             parse_mode="HTML",
-            reply_markup=None # Kill buttons to prevent double-click
+            reply_markup=None 
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # DO NOT USE 'PASS' HERE - Log the error so you can see it!
+        logging.error(f"Failed to edit admin caption: {e}")
+        # At least remove the buttons even if caption edit fails
+        await callback.message.edit_reply_markup(reply_markup=None)
 
     # 4. Handle Invite Links (The "Golden Ticket")
     # Using your existing logic to generate dynamic invite links
