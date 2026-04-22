@@ -404,7 +404,7 @@ async def process_payment(message: types.Message, state: FSMContext, db: Databas
     ))
     
     # Save payment to DB immediately
-    await db.submit_payment(message.from_user.id, payment_photo)
+    # await db.submit_payment(message.from_user.id, payment_photo)
     await db.update_user(message.from_user.id, registration_step='fayda')
     
     lang = (await state.get_data())['language']
