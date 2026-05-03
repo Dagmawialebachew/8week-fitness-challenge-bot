@@ -260,17 +260,14 @@ class Database:
             # Total number of unique people who have interacted with the bot
             query = "SELECT COUNT(*) FROM users"
             return await self._pool.fetchval(query)
-
-        elif status == "paid":
-            # Users who have a payment marked as 'approved'
-            # We use DISTINCT to ensure a user isn't counted twice if they have multiple payments
-            query = "SELECT COUNT(DISTINCT user_id) FROM payments WHERE status = 'approved'"
-            return await self._pool.fetchval(query)
-
-        elif status == "pending":
-            # Users who have uploaded a receipt but haven't been verified yet
-            query = "SELECT COUNT(DISTINCT user_id) FROM payments WHERE status = 'pending'"
-            return await self._pool.fetchval(query)
+        elif status == "verified":
+                    # Counts unique users who have a payment that is either 'approved' OR 'pending'
+                    query = """
+                        SELECT COUNT(DISTINCT user_id) 
+                        FROM payments 
+                        WHERE status IN ('approved', 'pending')
+                    """
+                    return await self._pool.fetchval(query)
 
         else: # unverified/incomplete
             # Users who exist in the system but have NO approved payments
