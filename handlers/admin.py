@@ -266,11 +266,14 @@ def admin_reply_menu():
         types.KeyboardButton(text="📊 Stats"),
         types.KeyboardButton(text="⏳ Pending"), 
     )
-    # Row 2: Management
+    # Row 2: Management & History
     builder.row(
         types.KeyboardButton(text="📢 Broadcast"),
-        types.KeyboardButton(text="🔍 Search User")
+        types.KeyboardButton(text="📜 All Trans.") # The new powerhouse button
     )
+    # Row 3: Utility
+    builder.row(types.KeyboardButton(text="🔍 Search User"))
+    
     return builder.as_markup(resize_keyboard=True)
 
 def quick_reject_keyboard(user_id):
@@ -750,7 +753,7 @@ def pending_management_menu():
     builder = ReplyKeyboardBuilder()
     builder.button(text="📂 P. Applications")
     builder.button(text="💰 P. Payments")
-    builder.button(text="📜 All Trans.")  # New Log Button
+    # builder.button(text="📜 All Trans.")  # New Log Button
     builder.button(text="🔙 Back")
     builder.adjust(2, 2) # Rows of 2, 2
     return builder.as_markup(resize_keyboard=True)
@@ -760,96 +763,96 @@ from aiogram.types import InputMediaPhoto
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-@router.message(F.text == "📜 All Trans.")
-async def show_all_transactions(message: types.Message, db: Database, page: int = 1):
-    # OFFSET logic for "1 Card at a Time" (The Premium approach)
-    limit = 1
-    offset = (page - 1) * limit
+# @router.message(F.text == "📜 All Trans.")
+# async def show_all_transactions(message: types.Message, db: Database, page: int = 1):
+#     # OFFSET logic for "1 Card at a Time" (The Premium approach)
+#     limit = 1
+#     offset = (page - 1) * limit
 
-    # 1. FETCH DATA (Joined User + Payment + Proof Image)
-    query = """
-        SELECT p.id, p.status, p.processed_by, p.processed_at, 
-               u.full_name, p.amount, p.proof_file_id, u.telegram_id
-        FROM payments p
-        JOIN users u ON p.user_id = u.telegram_id
-        ORDER BY p.created_at DESC
-        LIMIT $1 OFFSET $2
-    """
-    count_query = "SELECT COUNT(*) FROM payments"
+#     # 1. FETCH DATA (Joined User + Payment + Proof Image)
+#     query = """
+#         SELECT p.id, p.status, p.processed_by, p.processed_at, 
+#                u.full_name, p.amount, p.proof_file_id, u.telegram_id
+#         FROM payments p
+#         JOIN users u ON p.user_id = u.telegram_id
+#         ORDER BY p.created_at DESC
+#         LIMIT $1 OFFSET $2
+#     """
+#     count_query = "SELECT COUNT(*) FROM payments"
     
-    row = await db._pool.fetchrow(query, limit, offset)
-    total_count = await db._pool.fetchval(count_query) or 0
+#     row = await db._pool.fetchrow(query, limit, offset)
+#     total_count = await db._pool.fetchval(count_query) or 0
 
-    if not row:
-        return await message.answer("<b>× ARCHIVE_EMPTY // NO_RECORDS_FOUND</b>")
+#     if not row:
+#         return await message.answer("<b>× ARCHIVE_EMPTY // NO_RECORDS_FOUND</b>")
 
-    # 2. 2030 CINEMATIC CAPTION
-    # Status styling for instant recognition
-    status_map = {
-        'approved': "🟢 VERIFIED_SUCCESS",
-        'rejected': "🔴 DECLINED_VOID",
-        'pending':  "🟡 IN_REVIEW"
-    }
-    status_label = status_map.get(row['status'], "⚪ UNKNOWN")
+#     # 2. 2030 CINEMATIC CAPTION
+#     # Status styling for instant recognition
+#     status_map = {
+#         'approved': "🟢 VERIFIED_SUCCESS",
+#         'rejected': "🔴 DECLINED_VOID",
+#         'pending':  "🟡 IN_REVIEW"
+#     }
+#     status_label = status_map.get(row['status'], "⚪ UNKNOWN")
     
-    caption = (
-        f"<b>── TRANSACTION_RECORD ──</b>\n"
-        f"👤 <b>CLIENT:</b> {row['full_name'].upper()}\n"
-        f"🆔 <b>TG_ID:</b> <code>{row['telegram_id']}</code>\n"
-        f"💰 <b>VALUE:</b> <code>{row['amount']} ETB</code>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📑 <b>STATUS:</b> {status_label}\n"
-        f"🕒 <b>DATE:</b> {row['processed_at'].strftime('%Y/%m/%d %H:%M') if row['processed_at'] else 'PENDING'}\n"
-        f"👨‍💻 <b>ADMIN:</b> {row['processed_by'] or 'AUTO_SYSTEM'}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"<code>LOG_ENTRY: {page} // TOTAL_ENTRIES: {total_count}</code>"
-    )
+#     caption = (
+#         f"<b>── TRANSACTION_RECORD ──</b>\n"
+#         f"👤 <b>CLIENT:</b> {row['full_name'].upper()}\n"
+#         f"🆔 <b>TG_ID:</b> <code>{row['telegram_id']}</code>\n"
+#         f"💰 <b>VALUE:</b> <code>{row['amount']} ETB</code>\n"
+#         f"━━━━━━━━━━━━━━━\n"
+#         f"📑 <b>STATUS:</b> {status_label}\n"
+#         f"🕒 <b>DATE:</b> {row['processed_at'].strftime('%Y/%m/%d %H:%M') if row['processed_at'] else 'PENDING'}\n"
+#         f"👨‍💻 <b>ADMIN:</b> {row['processed_by'] or 'AUTO_SYSTEM'}\n"
+#         f"━━━━━━━━━━━━━━━\n"
+#         f"<code>LOG_ENTRY: {page} // TOTAL_ENTRIES: {total_count}</code>"
+#     )
 
-    # 3. DYNAMIC NAVIGATION
-    builder = InlineKeyboardBuilder()
+#     # 3. DYNAMIC NAVIGATION
+#     builder = InlineKeyboardBuilder()
     
-    # Navigation Row (Arrow Emojis + Modern Text)
-    nav_row = []
-    if page > 1:
-        nav_row.append(types.InlineKeyboardButton(text="« PREV", callback_data=f"alltrans_p_{page-1}"))
-    if page < total_count:
-        nav_row.append(types.InlineKeyboardButton(text="NEXT »", callback_data=f"alltrans_p_{page+1}"))
+#     # Navigation Row (Arrow Emojis + Modern Text)
+#     nav_row = []
+#     if page > 1:
+#         nav_row.append(types.InlineKeyboardButton(text="« PREV", callback_data=f"alltrans_p_{page-1}"))
+#     if page < total_count:
+#         nav_row.append(types.InlineKeyboardButton(text="NEXT »", callback_data=f"alltrans_p_{page+1}"))
     
-    if nav_row:
-        builder.row(*nav_row)
+#     if nav_row:
+#         builder.row(*nav_row)
 
-    # 4. EXECUTION (The UI Switcher)
-    try:
-        # If message comes from a callback (Next/Prev), we swap the media
-        if message.from_user.is_bot:
-            await message.edit_media(
-                media=InputMediaPhoto(
-                    media=row['proof_file_id'], 
-                    caption=caption, 
-                    parse_mode="HTML"
-                ),
-                reply_markup=builder.as_markup()
-            )
-        else:
-            # If it's a fresh text command, send new photo
-            await message.answer_photo(
-                photo=row['proof_file_id'],
-                caption=caption,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
-            )
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            await message.answer("🔄 Record current.")
-        else:
-            logging.error(f"UI Update Failed: {e}")
+#     # 4. EXECUTION (The UI Switcher)
+#     try:
+#         # If message comes from a callback (Next/Prev), we swap the media
+#         if message.from_user.is_bot:
+#             await message.edit_media(
+#                 media=InputMediaPhoto(
+#                     media=row['proof_file_id'], 
+#                     caption=caption, 
+#                     parse_mode="HTML"
+#                 ),
+#                 reply_markup=builder.as_markup()
+#             )
+#         else:
+#             # If it's a fresh text command, send new photo
+#             await message.answer_photo(
+#                 photo=row['proof_file_id'],
+#                 caption=caption,
+#                 reply_markup=builder.as_markup(),
+#                 parse_mode="HTML"
+#             )
+#     except TelegramBadRequest as e:
+#         if "message is not modified" in str(e):
+#             await message.answer("🔄 Record current.")
+#         else:
+#             logging.error(f"UI Update Failed: {e}")
 
 # 5. THE CALLBACK ROUTER
-@router.callback_query(F.data.startswith("alltrans_p_"))
-async def paginate_transactions(callback: types.CallbackQuery, db: Database):
-    page = int(callback.data.split("_")[-1])
-    await show_all_transactions(callback.message, db, page=page)
-    await callback.answer()
+# @router.callback_query(F.data.startswith("alltrans_p_"))
+# async def paginate_transactions(callback: types.CallbackQuery, db: Database):
+#     page = int(callback.data.split("_")[-1])
+#     await show_all_transactions(callback.message, db, page=page)
+#     await callback.answer()
     
     
 from aiogram.utils.media_group import MediaGroupBuilder
@@ -1020,3 +1023,106 @@ async def dispatch_broadcast(callback: types.CallbackQuery, state: FSMContext, d
         parse_mode="HTML"
     )
     await state.clear()
+    
+from datetime import datetime, timezone
+from aiogram.types import InputMediaPhoto
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+@router.message(F.text == "📜 All Trans.")
+async def show_transaction_log(message: types.Message, db: Database, page: int = 1):
+    limit = 1
+    offset = (page - 1) * limit
+
+    # Querying EVERYTHING: User details + Payment details
+    query = """
+        SELECT 
+            p.id, p.status, p.amount, p.proof_file_id, p.created_at, p.processed_by,
+            u.full_name, u.username, u.phone_number, u.current_weight_kg, u.telegram_id
+        FROM payments p
+        JOIN users u ON p.user_id = u.telegram_id
+        WHERE p.status IN ('approved', 'pending')
+        ORDER BY p.created_at DESC
+        LIMIT $1 OFFSET $2
+    """
+    count_query = "SELECT COUNT(*) FROM payments WHERE status IN ('approved', 'pending')"
+    
+    row = await db._pool.fetchrow(query, limit, offset)
+    total_count = await db._pool.fetchval(count_query) or 0
+
+    if not row:
+        return await message.answer("<b>× NO TRANSACTIONS FOUND</b>")
+
+    # Time Logic: "(X days ago)"
+    now = datetime.now(timezone.utc)
+    diff = now - row['created_at']
+    days_ago = f"({diff.days} days ago)" if diff.days > 0 else "(Today)"
+
+    # Mention Logic: Create a clickable link to their profile
+    user_mention = f"<a href='tg://user?id={row['telegram_id']}'>{row['full_name'].upper()}</a>"
+    
+    # Status Styling
+    status_label = "🟢 VERIFIED" if row['status'] == 'approved' else "⏳ PENDING"
+    admin_info = f"\n👤 <b>ADMIN:</b> {row['processed_by']}" if row['processed_by'] else ""
+
+    # The "Premium Card" Caption
+    caption = (
+        f"<b>── {status_label} TRANSACTION ──</b>\n\n"
+        f"👤 <b>USER:</b> {user_mention}\n"
+        f"📞 <b>PHONE:</b> <code>{row['phone_number']}</code>\n"
+        f"🆔 <b>TG_ID:</b> <code>{row['telegram_id']}</code>\n"
+        f"⚖️ <b>WEIGHT:</b> {row['current_weight_kg']} KG\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"💰 <b>VALUE:</b> {row['amount']} ETB\n"
+        f"📅 <b>DATE:</b> {row['created_at'].strftime('%b %d, %Y')} {days_ago}\n"
+        f"{admin_info}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"<code>ENTRY {page} OF {total_count}</code>"
+    )
+
+    builder = InlineKeyboardBuilder()
+    
+    # Row 1: The "Show Full Profile" shortcut (Reusing your existing view_prof_ logic)
+    # Note: Your view_prof_ handler expects user_id at index 2 (view_prof_id)
+    builder.row(types.InlineKeyboardButton(
+        text="🔍 VIEW FULL PROFILE", 
+        callback_data=f"view_prof_{row['telegram_id']}"
+    ))
+
+    # Row 2: Navigation
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(types.InlineKeyboardButton(text="« PREV", callback_data=f"log_p_{page-1}"))
+    if page < total_count:
+        nav_buttons.append(types.InlineKeyboardButton(text="NEXT »", callback_data=f"log_p_{page+1}"))
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+
+    # UI Execution
+    try:
+        if message.from_user.is_bot:
+            await message.edit_media(
+                media=InputMediaPhoto(
+                    media=row['proof_file_id'], 
+                    caption=caption, 
+                    parse_mode="HTML"
+                ),
+                reply_markup=builder.as_markup()
+            )
+        else:
+            await message.answer_photo(
+                photo=row['proof_file_id'],
+                caption=caption,
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+    except TelegramBadRequest:
+        pass
+
+# Pagination Callback
+@router.callback_query(F.data.startswith("log_p_"))
+async def paginate_logs(callback: types.CallbackQuery, db: Database):
+    page = int(callback.data.split("_")[-1])
+    await show_transaction_log(callback.message, db, page=page)
+    await callback.answer()
